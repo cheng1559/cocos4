@@ -323,6 +323,19 @@ void AudioEngineImpl::setVolume(int audioID, float volume) {
     }
 }
 
+bool AudioEngineImpl::setPitch(int audioID, float pitch) {
+    if (!checkAudioIdValid(audioID)) {
+        return false;
+    }
+    auto *player = _audioPlayers[audioID];
+    player->_pitch = pitch;
+    if (!player->_ready) {
+        return true;
+    }
+    alSourcef(player->_alSource, AL_PITCH, pitch);
+    return alGetError() == AL_NO_ERROR;
+}
+
 void AudioEngineImpl::setLoop(int audioID, bool loop) {
     if (!checkAudioIdValid(audioID)) {
         return;

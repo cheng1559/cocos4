@@ -48,7 +48,7 @@ unsigned int __idIndex = 0;
 }
 
 AudioPlayer::AudioPlayer()
-: _audioCache(nullptr), _finishCallbak(nullptr), _isDestroyed(false), _removeByAudioEngine(false), _ready(false), _currTime(0.0f), _streamingSource(false), _rotateBufferThread(nullptr), _timeDirty(false), _isRotateThreadExited(false), _needWakeupRotateThread(false), _id(++__idIndex) {
+: _audioCache(nullptr), _pitch(1.0F), _finishCallbak(nullptr), _isDestroyed(false), _removeByAudioEngine(false), _ready(false), _currTime(0.0f), _streamingSource(false), _rotateBufferThread(nullptr), _timeDirty(false), _isRotateThreadExited(false), _needWakeupRotateThread(false), _id(++__idIndex) {
     memset(_bufferIds, 0, sizeof(_bufferIds));
 }
 
@@ -154,7 +154,7 @@ bool AudioPlayer::play2d() {
 
         alSourcei(_alSource, AL_BUFFER, 0);
         CHECK_AL_ERROR_DEBUG();
-        alSourcef(_alSource, AL_PITCH, 1.0f);
+        alSourcef(_alSource, AL_PITCH, _pitch);
         CHECK_AL_ERROR_DEBUG();
         alSourcef(_alSource, AL_GAIN, _volume);
         CHECK_AL_ERROR_DEBUG();

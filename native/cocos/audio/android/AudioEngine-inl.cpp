@@ -295,6 +295,11 @@ void AudioEngineImpl::setVolume(int audioID, float volume) {
     }
 }
 
+bool AudioEngineImpl::setPitch(int audioID, float pitch) {
+    auto iter = _audioPlayers.find(audioID);
+    return iter != _audioPlayers.end() && iter->second->setPitch(pitch);
+}
+
 void AudioEngineImpl::setLoop(int audioID, bool loop) {
     auto iter = _audioPlayers.find(audioID);
     if (iter != _audioPlayers.end()) {

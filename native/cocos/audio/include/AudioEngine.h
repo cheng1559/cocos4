@@ -151,6 +151,15 @@ public:
     static void setVolume(int audioID, float volume);
 
     /**
+     * Sets the playback pitch for an audio instance.
+     *
+     * @param audioID An audioID returned by the play2d function.
+     * @param pitch Playback pitch (range from 0.5 to 2.0).
+     * @return Whether the backend supports pitch for this audio instance.
+     */
+    static bool setPitch(int audioID, float pitch);
+
+    /**
      * sets volume factor for all audio instance
      * @param factor, Volume factor(range from 0.0 to 1.0).
      */

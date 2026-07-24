@@ -33,7 +33,7 @@
 namespace cc {
 
 Track::Track(const PcmData &pcmData)
-: onStateChanged(nullptr), _pcmData(pcmData), _prevState(State::IDLE), _state(State::IDLE), _name(-1), _volume(1.0f), _isVolumeDirty(true), _isLoop(false), _isInitialized(false), _isAudioFocus(true) {
+: onStateChanged(nullptr), _pcmData(pcmData), _prevState(State::IDLE), _state(State::IDLE), _name(-1), _volume(1.0f), _isVolumeDirty(true), _pitch(1.0F), _isPitchDirty(true), _isLoop(false), _isInitialized(false), _isAudioFocus(true) {
     init(_pcmData.pcmBuffer->data(), _pcmData.numFrames, _pcmData.bitsPerSample / 8 * _pcmData.numChannels);
 }
 
@@ -67,6 +67,18 @@ void Track::setVolume(float volume) {
 
 float Track::getVolume() const {
     return _volume;
+}
+
+void Track::setPitch(float pitch) {
+    std::lock_guard<std::mutex> lk(_volumeDirtyMutex);
+    if (fabs(_pitch - pitch) > 0.00001F) {
+        _pitch = pitch;
+        setPitchDirty(true);
+    }
+}
+
+uint32_t Track::getPlaybackSampleRate() const {
+    return static_cast<uint32_t>(_pcmData.sampleRate * _pitch);
 }
 
 void Track::setAudioFocus(bool isFocus) {

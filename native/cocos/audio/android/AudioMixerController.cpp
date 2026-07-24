@@ -160,7 +160,12 @@ void AudioMixerController::initTrack(Track *track, ccstd::vector<Track *> &track
         _mixer->setParameter(name, AudioMixer::VOLUME, AudioMixer::VOLUME0, &lVolume);
         _mixer->setParameter(name, AudioMixer::VOLUME, AudioMixer::VOLUME1, &rVolume);
 
+        _mixer->setParameter(
+            name, AudioMixer::RESAMPLE, AudioMixer::SAMPLE_RATE,
+            reinterpret_cast<void *>(static_cast<uintptr_t>(track->getPlaybackSampleRate())));
+
         track->setVolumeDirty(false);
+        track->setPitchDirty(false);
         track->setInitialized(true);
     }
 }
@@ -224,6 +229,12 @@ void AudioMixerController::mixOneFrame() {
                 _mixer->setParameter(name, AudioMixer::VOLUME, AudioMixer::VOLUME1, &rVolume);
 
                 track->setVolumeDirty(false);
+            }
+            if (track->isPitchDirty()) {
+                _mixer->setParameter(
+                    name, AudioMixer::RESAMPLE, AudioMixer::SAMPLE_RATE,
+                    reinterpret_cast<void *>(static_cast<uintptr_t>(track->getPlaybackSampleRate())));
+                track->setPitchDirty(false);
             }
         } else if (state == Track::State::RESUMED) {
             initTrack(track, tracksToRemove);
