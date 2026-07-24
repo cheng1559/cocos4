@@ -29,14 +29,23 @@
 #include "cocos/bindings/manual/jsb_conversions.h"
 #include "cocos/bindings/manual/jsb_global.h"
 #include "cocos/platform/FileUtils.h"
+#include "cocos/platform/interfaces/modules/ISystemWindow.h"
 
 #import <Foundation/Foundation.h>
 #import <CoreText/CoreText.h>
+#if CC_PLATFORM == CC_PLATFORM_MACOS
+#include <SDL2/SDL.h>
+#elif CC_PLATFORM == CC_PLATFORM_IOS
+#import <UIKit/UIKit.h>
+#endif
 #include <regex>
 
 using namespace cc;
 
 static ccstd::unordered_map<ccstd::string, ccstd::string> _fontFamilyNameMap;
+#if CC_PLATFORM == CC_PLATFORM_MACOS
+static SDL_Cursor *systemCursor{nullptr};
+#endif
 
 const ccstd::unordered_map<ccstd::string, ccstd::string> &getFontFamilyNameMap() {
     return _fontFamilyNameMap;
@@ -115,7 +124,95 @@ static bool JSB_loadFont(se::State &s) {
 }
 SE_BIND_FUNC(JSB_loadFont)
 
+#if CC_PLATFORM == CC_PLATFORM_MACOS
+static SDL_Window *getMainWindow() {
+    return SDL_GetWindowFromID(ISystemWindow::mainWindowId);
+}
+
+static bool JSB_isWindowFullScreen(se::State &s) {
+    auto *window = getMainWindow();
+    s.rval().setBoolean(window && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0);
+    return true;
+}
+SE_BIND_FUNC(JSB_isWindowFullScreen)
+
+static bool JSB_setWindowFullScreen(se::State &s) {
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 1 && args[0].isBoolean(), false, "Expected a fullscreen boolean");
+
+    auto *window = getMainWindow();
+    const bool success = window && SDL_SetWindowFullscreen(
+        window, args[0].toBoolean() ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) == 0;
+    if (success && !args[0].toBoolean()) {
+        SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+    s.rval().setBoolean(success);
+    return true;
+}
+SE_BIND_FUNC(JSB_setWindowFullScreen)
+
+static bool JSB_setCursorStyle(se::State &s) {
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 1 && args[0].isString(), false, "Expected a cursor style string");
+
+    SDL_SystemCursor cursorId = SDL_SYSTEM_CURSOR_ARROW;
+    const auto &style = args[0].toString();
+    if (style == "pointer") {
+        cursorId = SDL_SYSTEM_CURSOR_HAND;
+    } else if (style == "move") {
+        cursorId = SDL_SYSTEM_CURSOR_SIZEALL;
+    } else if (style == "text") {
+        cursorId = SDL_SYSTEM_CURSOR_IBEAM;
+    }
+
+    auto *cursor = SDL_CreateSystemCursor(cursorId);
+    if (cursor) {
+        SDL_SetCursor(cursor);
+        SDL_FreeCursor(systemCursor);
+        systemCursor = cursor;
+    }
+    s.rval().setBoolean(cursor != nullptr);
+    return true;
+}
+SE_BIND_FUNC(JSB_setCursorStyle)
+#endif
+
+#if CC_PLATFORM == CC_PLATFORM_IOS
+static bool JSB_hideInputBoxAccessory(se::State &s) {
+    bool changed = false;
+    for (UIWindow *window in UIApplication.sharedApplication.windows) {
+        NSMutableArray<UIView *> *views = [NSMutableArray arrayWithObject:window];
+        while (views.count > 0) {
+            UIView *view = views.lastObject;
+            [views removeLastObject];
+            [views addObjectsFromArray:view.subviews];
+            if ([view isKindOfClass:UITextField.class] || [view isKindOfClass:UITextView.class]) {
+                id input = view;
+                [input setInputAccessoryView:nil];
+                if ([input respondsToSelector:@selector(inputAssistantItem)]) {
+                    UITextInputAssistantItem *assistant = [input inputAssistantItem];
+                    assistant.leadingBarButtonGroups = @[];
+                    assistant.trailingBarButtonGroups = @[];
+                }
+                [input reloadInputViews];
+                changed = true;
+            }
+        }
+    }
+    s.rval().setBoolean(changed);
+    return true;
+}
+SE_BIND_FUNC(JSB_hideInputBoxAccessory)
+#endif
+
 bool register_platform_bindings(se::Object *obj) {
     __jsbObj->defineFunction("loadFont", _SE(JSB_loadFont));
+#if CC_PLATFORM == CC_PLATFORM_MACOS
+    __jsbObj->defineFunction("isWindowFullScreen", _SE(JSB_isWindowFullScreen));
+    __jsbObj->defineFunction("setWindowFullScreen", _SE(JSB_setWindowFullScreen));
+    __jsbObj->defineFunction("setCursorStyle", _SE(JSB_setCursorStyle));
+#elif CC_PLATFORM == CC_PLATFORM_IOS
+    __jsbObj->defineFunction("hideInputBoxAccessory", _SE(JSB_hideInputBoxAccessory));
+#endif
     return true;
 }

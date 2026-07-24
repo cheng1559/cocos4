@@ -150,6 +150,10 @@ declare namespace jsb {
     export let onWindowEnter: () => void | undefined;
     export function openURL(url: string): void;
     export function garbageCollect(): void;
+    export const isWindowFullScreen: (() => boolean) | undefined;
+    export const setWindowFullScreen: ((fullScreen: boolean) => boolean) | undefined;
+    export const setCursorStyle: ((style: string) => boolean) | undefined;
+    export const hideInputBoxAccessory: (() => boolean) | undefined;
     enum AudioFormat {
         UNKNOWN,
         SIGNED_8,

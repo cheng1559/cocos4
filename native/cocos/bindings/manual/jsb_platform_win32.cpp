@@ -28,12 +28,16 @@
 #include "cocos/bindings/manual/jsb_conversions.h"
 #include "cocos/bindings/manual/jsb_global_init.h"
 #include "cocos/platform/FileUtils.h"
+#include "cocos/platform/interfaces/modules/ISystemWindow.h"
+
+#include <SDL2/SDL.h>
 
 #include <regex>
 
 using namespace cc;
 
 static ccstd::unordered_map<ccstd::string, ccstd::string> fontFamilyNameMap;
+static SDL_Cursor *systemCursor{nullptr};
 
 const ccstd::unordered_map<ccstd::string, ccstd::string> &getFontFamilyNameMap() {
     return fontFamilyNameMap;
@@ -80,7 +84,61 @@ static bool jsbLoadFont(se::State &s) {
 }
 SE_BIND_FUNC(jsbLoadFont)
 
+static SDL_Window *getMainWindow() {
+    return SDL_GetWindowFromID(ISystemWindow::mainWindowId);
+}
+
+static bool jsbIsWindowFullScreen(se::State &s) {
+    auto *window = getMainWindow();
+    s.rval().setBoolean(window && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0);
+    return true;
+}
+SE_BIND_FUNC(jsbIsWindowFullScreen)
+
+static bool jsbSetWindowFullScreen(se::State &s) {
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 1 && args[0].isBoolean(), false, "Expected a fullscreen boolean");
+
+    auto *window = getMainWindow();
+    const bool success = window && SDL_SetWindowFullscreen(
+        window, args[0].toBoolean() ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) == 0;
+    if (success && !args[0].toBoolean()) {
+        SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+    s.rval().setBoolean(success);
+    return true;
+}
+SE_BIND_FUNC(jsbSetWindowFullScreen)
+
+static bool jsbSetCursorStyle(se::State &s) {
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 1 && args[0].isString(), false, "Expected a cursor style string");
+
+    SDL_SystemCursor cursorId = SDL_SYSTEM_CURSOR_ARROW;
+    const auto &style = args[0].toString();
+    if (style == "pointer") {
+        cursorId = SDL_SYSTEM_CURSOR_HAND;
+    } else if (style == "move") {
+        cursorId = SDL_SYSTEM_CURSOR_SIZEALL;
+    } else if (style == "text") {
+        cursorId = SDL_SYSTEM_CURSOR_IBEAM;
+    }
+
+    auto *cursor = SDL_CreateSystemCursor(cursorId);
+    if (cursor) {
+        SDL_SetCursor(cursor);
+        SDL_FreeCursor(systemCursor);
+        systemCursor = cursor;
+    }
+    s.rval().setBoolean(cursor != nullptr);
+    return true;
+}
+SE_BIND_FUNC(jsbSetCursorStyle)
+
 bool register_platform_bindings(se::Object * /*obj*/) { // NOLINT(readability-identifier-naming)
     __jsbObj->defineFunction("loadFont", _SE(jsbLoadFont));
+    __jsbObj->defineFunction("isWindowFullScreen", _SE(jsbIsWindowFullScreen));
+    __jsbObj->defineFunction("setWindowFullScreen", _SE(jsbSetWindowFullScreen));
+    __jsbObj->defineFunction("setCursorStyle", _SE(jsbSetCursorStyle));
     return true;
 }
