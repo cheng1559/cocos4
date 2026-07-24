@@ -375,6 +375,8 @@ SDL_Window *SDLHelper::createWindow(const char *title,
 SDL_Window *SDLHelper::createWindow(const char *title,
                                     int x, int y, int w,
                                     int h, int flags) {
+    x = x == -1 ? SDL_WINDOWPOS_CENTERED : x;
+    y = y == -1 ? SDL_WINDOWPOS_CENTERED : y;
     // Create window
     int sdlFlags = windowFlagsToSDLWindowFlag(flags);
     SDL_Window *handle = SDL_CreateWindow(title, x, y, w, h, sdlFlags);
