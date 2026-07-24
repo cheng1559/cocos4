@@ -62,15 +62,22 @@ const orientationMap: Record<string, Orientation> = {
     180: Orientation.PORTRAIT_UPSIDE_DOWN,
 };
 
+type NativeWindowBindings = typeof jsb & {
+    isWindowFullScreen?: () => boolean;
+    setWindowFullScreen?: (fullScreen: boolean) => boolean;
+};
+
+const nativeWindow = jsb as NativeWindowBindings;
+
 class ScreenAdapter extends EventTarget {
     public isFrameRotated = false;
     public handleResizeEvent = true;
 
     public get supportFullScreen (): boolean {
-        return false;
+        return typeof nativeWindow.setWindowFullScreen === 'function';
     }
     public get isFullScreen (): boolean {
-        return false;
+        return nativeWindow.isWindowFullScreen?.() ?? false;
     }
 
     public get devicePixelRatio (): number {
@@ -150,10 +157,17 @@ class ScreenAdapter extends EventTarget {
     }
 
     public requestFullScreen (): Promise<void> {
-        return Promise.reject(new Error('request fullscreen has not been supported yet on this platform.'));
+        return this._setFullScreen(true);
     }
     public exitFullScreen (): Promise<void> {
-        return Promise.reject(new Error('exit fullscreen has not been supported yet on this platform.'));
+        return this._setFullScreen(false);
+    }
+
+    private _setFullScreen (fullScreen: boolean): Promise<void> {
+        if (!nativeWindow.setWindowFullScreen?.(fullScreen)) {
+            return Promise.reject(new Error('Fullscreen is not supported on this platform.'));
+        }
+        return Promise.resolve();
     }
 
     private _registerEvent (): void {
