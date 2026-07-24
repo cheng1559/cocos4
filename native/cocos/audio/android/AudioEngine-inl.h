@@ -58,6 +58,7 @@ public:
     static bool initDecoder();
     int play2d(const ccstd::string &filePath, bool loop, float volume);
     void setVolume(int audioID, float volume);
+    bool setPitch(int audioID, float pitch);
     void setLoop(int audioID, bool loop);
     void pause(int audioID);
     void resume(int audioID);

@@ -24,6 +24,7 @@
 ****************************************************************************/
 
 #include "audio/include/AudioEngine.h"
+#include <algorithm>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -282,6 +283,21 @@ void AudioEngine::setVolume(int audioID, float volume) {
             it->second.volume = volume;
         }
     }
+}
+
+bool AudioEngine::setPitch(int audioID, float pitch) {
+    if (sAudioIDInfoMap.find(audioID) == sAudioIDInfoMap.end()) {
+        return false;
+    }
+    pitch = std::clamp(pitch, 0.5F, 2.0F);
+#if CC_PLATFORM == CC_PLATFORM_ANDROID || CC_PLATFORM == CC_PLATFORM_OPENHARMONY || \
+    CC_PLATFORM == CC_PLATFORM_IOS || CC_PLATFORM == CC_PLATFORM_MACOS ||           \
+    CC_PLATFORM == CC_PLATFORM_WINDOWS || CC_PLATFORM == CC_PLATFORM_OHOS ||         \
+    CC_PLATFORM == CC_PLATFORM_LINUX || CC_PLATFORM == CC_PLATFORM_QNX
+    return sAudioEngineImpl->setPitch(audioID, pitch);
+#else
+    return false;
+#endif
 }
 
 void AudioEngine::setVolumeFactor(float factor) {

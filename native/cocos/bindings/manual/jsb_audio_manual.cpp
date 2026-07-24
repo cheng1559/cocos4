@@ -90,6 +90,18 @@ static bool js_audio_AudioEngine_getOriginalPCMBuffer(se::State& s) // NOLINT
 }
 SE_BIND_FUNC(js_audio_AudioEngine_getOriginalPCMBuffer)
 
+static bool js_audio_AudioEngine_setPitch(se::State& s) // NOLINT
+{
+    const auto& args = s.args();
+    if (args.size() != 2 || !args[0].isNumber() || !args[1].isNumber()) {
+        SE_REPORT_ERROR("wrong arguments: expected audio ID and pitch");
+        return false;
+    }
+    s.rval().setBoolean(cc::AudioEngine::setPitch(args[0].toInt32(), args[1].toFloat()));
+    return true;
+}
+SE_BIND_FUNC(js_audio_AudioEngine_setPitch)
+
 bool register_all_audio_manual(se::Object* obj) // NOLINT
 {
     se::Value jsbVal;
@@ -99,5 +111,6 @@ bool register_all_audio_manual(se::Object* obj) // NOLINT
 
     audioEngineVal.toObject()->defineFunction("getPCMHeader", _SE(js_audio_AudioEngine_getPCMHeader));
     audioEngineVal.toObject()->defineFunction("getOriginalPCMBuffer", _SE(js_audio_AudioEngine_getOriginalPCMBuffer));
+    audioEngineVal.toObject()->defineFunction("setPitch", _SE(js_audio_AudioEngine_setPitch));
     return true;
 }
