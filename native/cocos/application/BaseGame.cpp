@@ -56,20 +56,18 @@ int BaseGame::init() {
     //_windowInfo.y      = _windowInfo.y == -1 ? 0 : _windowInfo.y;
     _windowInfo.width = _windowInfo.width == -1 ? 800 : _windowInfo.width;
     _windowInfo.height = _windowInfo.height == -1 ? 600 : _windowInfo.height;
-    _windowInfo.flags = _windowInfo.flags == -1 ? cc::ISystemWindow::CC_WINDOW_SHOWN |
-                                                      cc::ISystemWindow::CC_WINDOW_RESIZABLE |
-                                                      cc::ISystemWindow::CC_WINDOW_INPUT_FOCUS
-                                                : _windowInfo.flags;
+    if (_windowInfo.flags == -1) {
+        _windowInfo.flags = cc::ISystemWindow::CC_WINDOW_SHOWN |
+                            cc::ISystemWindow::CC_WINDOW_INPUT_FOCUS;
+    #if CC_PLATFORM != CC_PLATFORM_WINDOWS
+        _windowInfo.flags |= cc::ISystemWindow::CC_WINDOW_RESIZABLE;
+    #endif
+    }
     std::call_once(_windowCreateFlag, [&]() {
         ISystemWindowInfo info;
         info.title = _windowInfo.title;
-    #if CC_PLATFORM == CC_PLATFORM_WINDOWS
-        info.x = _windowInfo.x == -1 ? 50 : _windowInfo.x; // 50 meams move window a little for now
-        info.y = _windowInfo.y == -1 ? 50 : _windowInfo.y; // same above
-    #else
-        info.x = _windowInfo.x == -1 ? 0 : _windowInfo.x;
-        info.y = _windowInfo.y == -1 ? 0 : _windowInfo.y;
-    #endif
+        info.x = _windowInfo.x;
+        info.y = _windowInfo.y;
         info.width = _windowInfo.width;
         info.height = _windowInfo.height;
         info.flags = _windowInfo.flags;
