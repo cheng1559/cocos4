@@ -68,7 +68,9 @@ RenderAdditiveLightQueue::RenderAdditiveLightQueue(RenderPipeline *pipeline) : _
 void RenderAdditiveLightQueue::recordCommandBuffer(gfx::Device *device, scene::Camera *camera, gfx::RenderPass *renderPass, gfx::CommandBuffer *cmdBuffer) {
     const uint32_t offset = _pipeline->getPipelineUBO()->getCurrentCameraUBOOffset();
     for (uint32_t i = 0; i < _instancedQueues.size(); ++i) {
-        if (!this->_instancedQueues[i]) { continue; }
+        if (!this->_instancedQueues[i]) {
+            continue;
+        }
         const auto *light = _instancedLightPass.lights[i];
         _dynamicOffsets[0] = _instancedLightPass.dynamicOffsets[i];
         auto *globalDescriptorSet = _pipeline->getGlobalDSManager()->getOrCreateDescriptorSet(light);
@@ -208,7 +210,8 @@ void RenderAdditiveLightQueue::addRenderQueue(scene::SubModel *subModel, const s
         const auto lightIdx = _lightIndices[i];
         const auto *light = _validPunctualLights[lightIdx];
         const auto visibility = light->getVisibility();
-        if ((visibility & model->getNode()->getLayer()) == model->getNode()->getLayer()) {
+        if (((visibility & model->getNode()->getLayer()) == model->getNode()->getLayer()) ||
+            (visibility & static_cast<uint32_t>(model->getVisFlags()))) {
             switch (batchingScheme) {
                 case scene::BatchingSchemes::INSTANCING: {
                     auto *buffer = pass->getInstancedBuffer(lightIdx);
@@ -502,7 +505,7 @@ bool RenderAdditiveLightQueue::getLightPassIndex(const scene::Model *model, ccst
             }
             ++k;
         }
-        lightPassIndices->push_back(static_cast<uint32_t>(lightPassIndex)); 
+        lightPassIndices->push_back(static_cast<uint32_t>(lightPassIndex));
     }
 
     return hasValidLightPass;

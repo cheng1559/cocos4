@@ -434,7 +434,8 @@ export class BuiltinForwardPassBuilder implements rendering.PipelinePassBuilder 
         // Reflection Probe
         cameraConfigs.enablePlanarReflectionProbe = cameraConfigs.isMainGameWindow
             || camera.cameraUsage === CameraUsage.SCENE_VIEW
-            || camera.cameraUsage === CameraUsage.GAME_VIEW;
+            || camera.cameraUsage === CameraUsage.GAME_VIEW
+            || camera.cameraUsage === CameraUsage.PREVIEW;
 
         // MSAA
         cameraConfigs.enableMSAA = cameraConfigs.settings.msaa.enabled
@@ -551,7 +552,7 @@ export class BuiltinForwardPassBuilder implements rendering.PipelinePassBuilder 
                 ppl, camera, pplConfigs.mobileMaxSpotLightShadowMaps);
         }
 
-        this._tryAddReflectionProbePasses(ppl, cameraConfigs, id, mainLight, camera.scene);
+        this._tryAddReflectionProbePasses(ppl, cameraConfigs, id, mainLight, camera.scene, camera);
 
         if (cameraConfigs.remainingPasses > 0 || cameraConfigs.enableShadingScale) {
             context.colorName = cameraConfigs.enableShadingScale
@@ -630,6 +631,7 @@ export class BuiltinForwardPassBuilder implements rendering.PipelinePassBuilder 
         id: number,
         mainLight: renderer.scene.DirectionalLight | null,
         scene: renderer.RenderScene | null,
+        sourceCamera: renderer.scene.Camera,
     ): void {
         const reflectionProbeManager = cclegacy.internal.reflectionProbeManager as ReflectionProbeManager | undefined;
         if (!reflectionProbeManager) {
@@ -651,6 +653,10 @@ export class BuiltinForwardPassBuilder implements rendering.PipelinePassBuilder 
                 if (!cameraConfigs.enablePlanarReflectionProbe) {
                     continue;
                 }
+                let reflectionCamera = probe.camera;
+                if (EDITOR && sourceCamera.cameraUsage === CameraUsage.PREVIEW) {
+                    reflectionCamera = probe.renderPreviewPlanarReflection(sourceCamera);
+                }
                 const window: renderer.RenderWindow = probe.realtimePlanarTexture!.window!;
                 const colorName = `PlanarProbeRT${probeID}`;
                 const depthStencilName = `PlanarProbeDS${probeID}`;
@@ -663,8 +669,8 @@ export class BuiltinForwardPassBuilder implements rendering.PipelinePassBuilder 
                 // Rendering
                 const probePass = ppl.addRenderPass(width, height, 'default');
                 probePass.name = `PlanarReflectionProbe${probeID}`;
-                this._buildReflectionProbePass(probePass, cameraConfigs, id, probe.camera,
-                    colorName, depthStencilName, mainLight, scene);
+                this._buildReflectionProbePass(probePass, cameraConfigs, id, reflectionCamera, probe,
+                    colorName, depthStencilName, mainLight);
             } else if (EDITOR) {
                 for (let faceIdx = 0; faceIdx < probe.bakedCubeTextures.length; faceIdx++) {
                     probe.updateCameraDir(faceIdx);
@@ -680,8 +686,8 @@ export class BuiltinForwardPassBuilder implements rendering.PipelinePassBuilder 
                     // Rendering
                     const probePass = ppl.addRenderPass(width, height, 'default');
                     probePass.name = `CubeProbe${probeID}${faceIdx}`;
-                    this._buildReflectionProbePass(probePass, cameraConfigs, id, probe.camera,
-                        colorName, depthStencilName, mainLight, scene);
+                    this._buildReflectionProbePass(probePass, cameraConfigs, id, probe.camera, probe,
+                        colorName, depthStencilName, mainLight);
                 }
                 probe.needRender = false;
             }
@@ -696,10 +702,10 @@ export class BuiltinForwardPassBuilder implements rendering.PipelinePassBuilder 
         cameraConfigs: Readonly<CameraConfigs & ForwardPassConfigs>,
         id: number,
         camera: renderer.scene.Camera,
+        probe: renderer.scene.ReflectionProbe,
         colorName: string,
         depthStencilName: string,
         mainLight: renderer.scene.DirectionalLight | null,
-        scene: renderer.RenderScene | null = null,
     ): void {
         const QueueHint = rendering.QueueHint;
         const SceneFlags = rendering.SceneFlags;
@@ -743,11 +749,11 @@ export class BuiltinForwardPassBuilder implements rendering.PipelinePassBuilder 
         // TODO(zhouzhenglong): Separate OPAQUE and MASK queue
 
         // add opaque and mask queue
+        const lightInfo = new rendering.LightInfo(mainLight || null, 0, false, probe);
         pass.addQueue(QueueHint.NONE, 'reflect-map') // Currently we put OPAQUE and MASK into one queue, so QueueHint is NONE
-            .addScene(camera,
-                SceneFlags.OPAQUE | SceneFlags.MASK | SceneFlags.REFLECTION_PROBE,
-                mainLight || undefined,
-                scene ? scene : undefined);
+            .addSceneOfCamera(camera,
+                lightInfo,
+                SceneFlags.OPAQUE | SceneFlags.MASK | SceneFlags.REFLECTION_PROBE);
     }
     private _addForwardRadiancePasses(
         ppl: rendering.BasicPipeline,

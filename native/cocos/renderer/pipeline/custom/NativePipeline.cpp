@@ -22,6 +22,7 @@
  THE SOFTWARE.
 ****************************************************************************/
 
+#include "bindings/jswrapper/SeApi.h" // IWYU pragma: keep
 #include "cocos/renderer/pipeline/Define.h"
 #include "cocos/renderer/pipeline/PipelineSceneData.h"
 #include "cocos/renderer/pipeline/PipelineStateManager.h"
@@ -30,22 +31,25 @@
 #include "cocos/renderer/pipeline/custom/NativeBuiltinUtils.h"
 #include "cocos/renderer/pipeline/custom/NativePipelineTypes.h"
 #include "cocos/renderer/pipeline/custom/NativeRenderGraphUtils.h"
+#include "cocos/renderer/pipeline/custom/NativeUtils.h"
 #include "cocos/renderer/pipeline/custom/RenderGraphGraphs.h"
 #include "cocos/renderer/pipeline/custom/RenderInterfaceTypes.h"
 #include "cocos/renderer/pipeline/custom/RenderingModule.h"
 #include "cocos/renderer/pipeline/custom/details/GslUtils.h"
 #include "cocos/renderer/pipeline/custom/details/Range.h"
+#include "cocos/scene/DirectionalLight.h"
 #include "cocos/scene/ReflectionProbe.h"
 #include "cocos/scene/ReflectionProbeManager.h"
 #include "cocos/scene/RenderScene.h"
 #include "cocos/scene/RenderWindow.h"
 #include "cocos/scene/SpotLight.h"
-#include "cocos/scene/DirectionalLight.h"
-#include "bindings/jswrapper/SeApi.h" // IWYU pragma: keep
-#include "cocos/renderer/pipeline/custom/NativeUtils.h"
 
 #if CC_USE_DEBUG_RENDERER
     #include "profiler/DebugRenderer.h"
+#endif
+
+#if CC_USE_GEOMETRY_RENDERER
+    #include "cocos/renderer/pipeline/GeometryRenderer.h"
 #endif
 
 namespace cc {
@@ -105,6 +109,54 @@ void addSubresourceNode<gfx::Format::DEPTH_STENCIL>(ResourceGraph::vertex_descri
 }
 
 } // namespace
+
+#if CC_USE_DEBUG_RENDERER
+namespace {
+class DebugRendererRenderCommand final : public CustomRenderCommand {
+public:
+    explicit DebugRendererRenderCommand(pipeline::PipelineSceneData *sceneData)
+    : _sceneData(sceneData) {}
+
+    void beginRenderCommand(const CustomRenderGraphContext &rg, RenderGraph::vertex_descriptor vertID) override {
+        std::ignore = vertID;
+        if (rg.currentRenderPass) {
+            DebugRenderer::getInstance()->render(rg.currentRenderPass, rg.primaryCommandBuffer, _sceneData);
+        }
+    }
+
+    void endRenderCommand(const CustomRenderGraphContext &rg, RenderGraph::vertex_descriptor vertID) override {
+        std::ignore = rg;
+        std::ignore = vertID;
+    }
+
+private:
+    pipeline::PipelineSceneData *_sceneData{nullptr};
+};
+} // namespace
+#endif
+
+#if CC_USE_GEOMETRY_RENDERER
+class GeometryRendererRenderCommand final : public CustomRenderCommand {
+public:
+    explicit GeometryRendererRenderCommand(pipeline::PipelineSceneData *sceneData)
+    : _sceneData(sceneData) {}
+
+    void beginRenderCommand(const CustomRenderGraphContext &rg, RenderGraph::vertex_descriptor vertID) override {
+        const auto &sceneData = get(SceneTag{}, vertID, *rg.renderGraph);
+        if (sceneData.camera && sceneData.camera->getGeometryRenderer()) {
+            sceneData.camera->getGeometryRenderer()->render(rg.currentRenderPass, rg.primaryCommandBuffer, _sceneData);
+        }
+    }
+
+    void endRenderCommand(const CustomRenderGraphContext &rg, RenderGraph::vertex_descriptor vertID) override {
+        std::ignore = vertID;
+        std::ignore = rg;
+    }
+
+private:
+    pipeline::PipelineSceneData *_sceneData{nullptr};
+};
+#endif
 
 NativePipeline::NativePipeline(const allocator_type &alloc) noexcept
 : device(gfx::Device::getInstance()),
@@ -1319,7 +1371,7 @@ void buildRenderPipeline() {
     if (buildRPVal.isUndefined()) {
         auto *global = se::ScriptEngine::getInstance()->getGlobalObject();
         se::Value jsbVal;
-        if(global->getProperty("jsb", &jsbVal) && jsbVal.isObject()) {
+        if (global->getProperty("jsb", &jsbVal) && jsbVal.isObject()) {
             jsbVal.toObject()->getProperty("buildRenderPipeline", &buildRPVal);
         }
         se::ScriptEngine::getInstance()->addBeforeCleanupHook([]() {
@@ -1385,6 +1437,10 @@ bool NativePipeline::activate(gfx::Swapchain *swapchainIn) {
     pipelineSceneData->activate(device);
 #if CC_USE_DEBUG_RENDERER
     DebugRenderer::getInstance()->activate(device);
+    addCustomRenderCommand(cc::pipeline::DEBUG_RENDERER_COMMAND, std::make_shared<DebugRendererRenderCommand>(getPipelineSceneData()));
+#endif
+#if CC_USE_GEOMETRY_RENDERER
+    addCustomRenderCommand(cc::pipeline::GEOMETRY_RENDERER_COMMAND, std::make_shared<GeometryRendererRenderCommand>(getPipelineSceneData()));
 #endif
     // generate macros here rather than construct func because _clusterEnabled
     // switch may be changed in root.ts setRenderPipeline() function which is after
@@ -1693,7 +1749,7 @@ void NativePipeline::setSampler(const ccstd::string &name, gfx::Sampler *sampler
 }
 
 void NativePipeline::setBuiltinCameraConstants(const scene::Camera *camera) {
-    const auto* scene = camera->getScene();
+    const auto *scene = camera->getScene();
     setCameraUBOValues(
         *camera,
         programLibrary->layoutGraph,

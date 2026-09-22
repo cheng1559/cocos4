@@ -1,9 +1,18 @@
-cmake_minimum_required(VERSION 3.8)
+cmake_minimum_required(VERSION 3.28)
 
 set(CMAKE_SYSTEM_NAME iOS)
 set(APP_NAME "CocosGame"  CACHE STRING "Project Name")
 
 project(${APP_NAME} CXX)
+
+# Xcode 14.3+ no longer supports running under Rosetta on Apple Silicon,
+# so iOS Simulator must use arm64 instead of x86_64.
+# See: https://developer.apple.com/documentation/xcode-release-notes/xcode-14_3-release-notes
+if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64" AND "${XCODE_VERSION}" VERSION_GREATER_EQUAL "14.3")
+    set(CMAKE_OSX_ARCHITECTURES "arm64" CACHE STRING "" FORCE)
+else()
+    set(CMAKE_OSX_ARCHITECTURES "arm64;x86_64" CACHE STRING "" FORCE)
+endif()
 
 set(CC_PROJECT_DIR ${CMAKE_CURRENT_LIST_DIR})
 set(CC_UI_RESOURCES)
