@@ -8,6 +8,7 @@ const path = require('path');
 const checks = [
     syncInstalledPackage,
     ensureWorker,
+    patchNativeFullScreen,
 ];
 
 // Written by spread-pal.cjs: where pal/ was copied from, and the package version at that time.
@@ -185,6 +186,38 @@ function ensureWorker(palRoot) {
     console.log('[pal-worker] PAL has no worker module; installed single-thread compatibility backend. '
         + 'Run `npm install` to pick up @cocos/engine-pal with platform workers.');
     return true;
+}
+
+// PvZ: the native screen adapter in the PAL package reports fullscreen as unsupported. Route it
+// through jsb.setWindowFullScreen / jsb.isWindowFullScreen instead. Runs after every copy, so a
+// re-synchronized pal/ is patched again; throws if the PAL layout changed.
+const FULLSCREEN_PATCHES = [
+    [
+        'get supportFullScreen(){return false}get isFullScreen(){return false}',
+        'get supportFullScreen(){return typeof jsb.setWindowFullScreen==="function"}get isFullScreen(){return jsb.isWindowFullScreen?.()??false}',
+    ],
+    [
+        'requestFullScreen(){return Promise.reject(new Error("request fullscreen has not been supported yet on this platform."))}exitFullScreen(){return Promise.reject(new Error("exit fullscreen has not been supported yet on this platform."))}',
+        'requestFullScreen(){return this._ccprivate$_setFullScreen(true)}exitFullScreen(){return this._ccprivate$_setFullScreen(false)}_ccprivate$_setFullScreen(fullScreen){if(!jsb.setWindowFullScreen?.(fullScreen)){return Promise.reject(new Error("Fullscreen is not supported on this platform."))}return Promise.resolve()}',
+    ],
+];
+
+function patchNativeFullScreen(palRoot) {
+    // Minimal PAL copies (script tests) have no screen adapter at all.
+    if (!fs.existsSync(path.join(palRoot, 'screen-adapter'))) return false;
+    const file = path.join(palRoot, 'screen-adapter', 'native', 'screen-adapter.js');
+    let source = fs.readFileSync(file, 'utf8');
+    let changed = false;
+    for (const [before, after] of FULLSCREEN_PATCHES) {
+        if (source.includes(after)) continue;
+        if (!source.includes(before)) {
+            throw new Error(`[spread-pal] Native screen adapter layout changed; update the PVZ fullscreen patch: ${before}`);
+        }
+        source = source.replace(before, after);
+        changed = true;
+    }
+    if (changed) fs.writeFileSync(file, source);
+    return changed;
 }
 
 module.exports = ensurePal;

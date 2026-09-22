@@ -296,3 +296,31 @@ test('a fallback generated with the old root index.js layout is migrated', (t) =
     assert.ok(isFallback(e.pal));
     assert.equal(e.ensure(), false);
 });
+
+test('PvZ native fullscreen patch is reapplied after pal/ re-syncs to a new package', (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pal fullscreen '));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const ensure = require('../../scripts/ensure-pal.cjs');
+    const original = 'class A{get supportFullScreen(){return false}get isFullScreen(){return false}'
+        + 'requestFullScreen(){return Promise.reject(new Error("request fullscreen has not been supported yet on this platform."))}'
+        + 'exitFullScreen(){return Promise.reject(new Error("exit fullscreen has not been supported yet on this platform."))}}';
+    const pkg = path.join(root, 'node_modules/@cocos/engine-pal');
+    const adapter = (dir) => path.join(dir, 'screen-adapter/native/screen-adapter.js');
+    fs.mkdirSync(path.dirname(adapter(path.join(pkg, 'dist'))), { recursive: true });
+    fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ version: '2.0.0' }));
+    fs.writeFileSync(adapter(path.join(pkg, 'dist')), original);
+    const pal = path.join(root, 'pal');
+    fs.mkdirSync(path.dirname(adapter(pal)), { recursive: true });
+    fs.writeFileSync(path.join(pal, '.pal-source.json'), JSON.stringify({ package: '@cocos/engine-pal', version: '1.0.0' }));
+    fs.writeFileSync(adapter(pal), 'stale');
+
+    assert.equal(ensure(pal), true);
+    const patched = fs.readFileSync(adapter(pal), 'utf8');
+    assert.match(patched, /jsb\.setWindowFullScreen\?\.\(fullScreen\)/);
+    assert.match(patched, /jsb\.isWindowFullScreen\?\.\(\)/);
+    assert.equal(ensure(pal), false, 'an already patched adapter must not be rewritten');
+    assert.equal(fs.readFileSync(adapter(pal), 'utf8'), patched);
+
+    fs.writeFileSync(adapter(pal), 'class A{}');
+    assert.throws(() => ensure(pal), /update the PVZ fullscreen patch/);
+});
