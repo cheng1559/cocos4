@@ -45,4 +45,25 @@ function copyDir(s, d) {
 
 removeExisting(dst);
 copyDir(src, dst);
+
+const nativeScreenAdapter = path.join(dst, 'screen-adapter', 'native', 'screen-adapter.js');
+let nativeScreenSource = fs.readFileSync(nativeScreenAdapter, 'utf8');
+
+function replaceRequired(before, after) {
+    if (!nativeScreenSource.includes(before)) {
+        throw new Error(`[spread-pal] Native screen adapter layout changed; update the PVZ fullscreen patch: ${before}`);
+    }
+    nativeScreenSource = nativeScreenSource.replace(before, after);
+}
+
+replaceRequired(
+    'get supportFullScreen(){return false}get isFullScreen(){return false}',
+    'get supportFullScreen(){return typeof jsb.setWindowFullScreen==="function"}get isFullScreen(){return jsb.isWindowFullScreen?.()??false}',
+);
+replaceRequired(
+    'requestFullScreen(){return Promise.reject(new Error("request fullscreen has not been supported yet on this platform."))}exitFullScreen(){return Promise.reject(new Error("exit fullscreen has not been supported yet on this platform."))}',
+    'requestFullScreen(){return this._ccprivate$_setFullScreen(true)}exitFullScreen(){return this._ccprivate$_setFullScreen(false)}_ccprivate$_setFullScreen(fullScreen){if(!jsb.setWindowFullScreen?.(fullScreen)){return Promise.reject(new Error("Fullscreen is not supported on this platform."))}return Promise.resolve()}',
+);
+fs.writeFileSync(nativeScreenAdapter, nativeScreenSource);
+
 console.log(`[spread-pal] 已复制 ${count} 个文件: ${src} -> ${dst}`);

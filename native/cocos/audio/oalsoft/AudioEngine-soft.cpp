@@ -453,13 +453,16 @@ float AudioEngineImpl::getCurrentTime(int audioID) {
     if (player->_ready) {
         if (player->_streamingSource) {
             ret = player->getTime();
+            float bufferOffset = 0.0F;
+            alGetSourcef(player->_alSource, AL_SEC_OFFSET, &bufferOffset);
+            ret = std::min(ret + bufferOffset, player->_audioCache->_duration);
         } else {
             alGetSourcef(player->_alSource, AL_SEC_OFFSET, &ret);
+        }
 
-            auto error = alGetError();
-            if (error != AL_NO_ERROR) {
-                ALOGE("%s, audio id:%d,error code:%x", __FUNCTION__, audioID, error);
-            }
+        auto error = alGetError();
+        if (error != AL_NO_ERROR) {
+            ALOGE("%s, audio id:%d,error code:%x", __FUNCTION__, audioID, error);
         }
     }
 
