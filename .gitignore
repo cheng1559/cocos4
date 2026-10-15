@@ -26,6 +26,8 @@ editor/library/
 
 !templates/**/*
 templates/**/.DS_Store
+templates/**/.gradle/
+templates/**/build/build/
 
 platforms/runtime/local-commit.json
 platforms/runtime/common/web-adapter.js
