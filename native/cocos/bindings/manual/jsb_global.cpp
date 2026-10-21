@@ -45,6 +45,7 @@
 #include "xxtea/xxtea.h"
 
 #include <chrono>
+#include <limits>
 #include <regex>
 #include <sstream>
 
@@ -818,7 +819,12 @@ static bool JSB_setPreferredFramesPerSecond(se::State &s) { // NOLINT
     CC_UNUSED bool ok = true;
     if (argc > 0) {
         int32_t fps;
-        ok = sevalue_to_native(args[0], &fps);
+        // Infinity requests a zero frame interval without overflowing the integer platform timers.
+        if (args[0].isNumber() && args[0].toDouble() == std::numeric_limits<double>::infinity()) {
+            fps = std::numeric_limits<int32_t>::max();
+        } else {
+            ok = sevalue_to_native(args[0], &fps);
+        }
         SE_PRECONDITION2(ok, false, "fps is invalid!");
         // cc::log("EMPTY IMPLEMENTATION OF jsb.setPreferredFramesPerSecond");
         CC_CURRENT_ENGINE()->setPreferredFramesPerSecond(fps);

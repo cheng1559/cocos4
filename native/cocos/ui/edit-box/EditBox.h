@@ -62,6 +62,11 @@ public:
     static void show(const ShowInfo &showInfo);
     static void hide();
 
+#if CC_PLATFORM == CC_PLATFORM_MACOS
+    static void setText(const ccstd::string &text, int start, int end);
+    static bool getSelection(int &start, int &end);
+#endif
+
     // It is internally to send a complete message to JS.
     // Don't call it by yourself untile you know the effect.
     static bool complete();
