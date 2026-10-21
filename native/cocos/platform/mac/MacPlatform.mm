@@ -71,10 +71,7 @@ bool MacPlatform::readyToExit() {
 }
 
 void MacPlatform::exit() {
-    if(!_readyToExit) {
-        [[NSApplication sharedApplication] replyToApplicationShouldTerminate:true];
-        _readyToExit = true;
-    }
+    _readyToExit = true;
 }
 
 int32_t MacPlatform::loop(void) {

@@ -37,6 +37,7 @@
  ************************************************************************/
 namespace {
 void callJSFunc(const ccstd::string &type, const ccstd::string &text);
+bool handleInputKey(NSTextView *editor, SEL command);
 }
 
 /*************************************************************************
@@ -98,6 +99,9 @@ se::Value g_textInputCallback;
 - (void)controlTextDidEndEditing:(NSNotification *)obj {
     cc::EditBox::complete();
 }
+- (BOOL)control:(NSControl *)control textView:(NSTextView *)textView doCommandBySelector:(SEL)command {
+    return handleInputKey(textView, command);
+}
 @end
 
 /*************************************************************************
@@ -153,6 +157,24 @@ se::Value g_textInputCallback;
 namespace {
 
 static cc::events::Resize::Listener resizeListener;
+
+bool handleInputKey(NSTextView *editor, SEL command) {
+    if (editor.hasMarkedText) return false;
+    const char *key = nullptr;
+    if (command == @selector(insertTab:) || command == @selector(insertBacktab:)) key = "Tab";
+    else if (command == @selector(insertNewline:)) key = "Enter";
+    else if (command == @selector(cancelOperation:)) key = "Escape";
+    else if (command == @selector(moveUp:)) key = "ArrowUp";
+    else if (command == @selector(moveDown:)) key = "ArrowDown";
+    if (!key) return false;
+
+    se::AutoHandleScope scope;
+    se::Value callback;
+    if (!__jsbObj->getProperty("onInputBoxKey", &callback) || !callback.isObject() || !callback.toObject()->isFunction()) return false;
+    se::Value result;
+    callback.toObject()->call({se::Value(key), se::Value((NSEvent.modifierFlags & NSEventModifierFlagShift) != 0)}, nullptr, &result);
+    return result.isBoolean() && result.toBoolean();
+}
 
 void getTextInputCallback() {
     if (!g_textInputCallback.isUndefined())
@@ -260,6 +282,28 @@ void init(const cc::EditBox::ShowInfo &showInfo) {
 namespace cc {
 
 bool EditBox::_isShown = false;
+
+bool EditBox::getSelection(int &start, int &end) {
+    if (!_isShown) return false;
+    NSTextView *editor = g_isMultiline ? g_textView : (NSTextView *)[(g_isPassword ? g_secureTextField : g_textField) currentEditor];
+    if (!editor) return false;
+    const NSRange range = editor.selectedRange;
+    start = static_cast<int>(range.location);
+    end = static_cast<int>(NSMaxRange(range));
+    return true;
+}
+
+void EditBox::setText(const ccstd::string &text, int start, int end) {
+    if (!_isShown) return;
+    NSString *value = [NSString stringWithUTF8String:text.c_str()];
+    NSTextField *field = g_isPassword ? g_secureTextField : g_textField;
+    NSTextView *editor = g_isMultiline ? g_textView : (NSTextView *)field.currentEditor;
+    if (!g_isMultiline) field.stringValue = value;
+    if (![editor.string isEqualToString:value]) editor.string = value;
+    const NSUInteger from = MIN(value.length, MAX(0, MIN(start, end)));
+    const NSUInteger to = MIN(value.length, MAX(0, MAX(start, end)));
+    editor.selectedRange = NSMakeRange(from, to - from);
+}
 
 void EditBox::show(const ShowInfo &showInfo) {
     g_isMultiline = showInfo.isMultiline;

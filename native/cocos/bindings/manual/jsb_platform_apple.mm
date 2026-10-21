@@ -34,7 +34,9 @@
 #import <Foundation/Foundation.h>
 #import <CoreText/CoreText.h>
 #if CC_PLATFORM == CC_PLATFORM_MACOS
+#import <AppKit/AppKit.h>
 #include <SDL2/SDL.h>
+#include "cocos/ui/edit-box/EditBox.h"
 #elif CC_PLATFORM == CC_PLATFORM_IOS
 #import <UIKit/UIKit.h>
 #endif
@@ -175,6 +177,49 @@ static bool JSB_setCursorStyle(se::State &s) {
     return true;
 }
 SE_BIND_FUNC(JSB_setCursorStyle)
+
+static bool JSB_selectFile(se::State &s) {
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 1 && args[0].isString(), false, "Expected a file extension");
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    panel.canChooseFiles = YES;
+    panel.canChooseDirectories = NO;
+    panel.allowsMultipleSelection = NO;
+    panel.allowedFileTypes = @[[NSString stringWithUTF8String:args[0].toString().c_str()]];
+    panel.allowsOtherFileTypes = NO;
+    if ([panel runModal] == NSModalResponseOK) {
+        s.rval().setString(panel.URL.path.UTF8String);
+    } else {
+        s.rval().setNull();
+    }
+    return true;
+}
+SE_BIND_FUNC(JSB_selectFile)
+
+#if CC_USE_EDITBOX
+static bool JSB_setInputBoxText(se::State &s) {
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 3 && args[0].isString() && args[1].isNumber() && args[2].isNumber(), false, "Expected text and selection range");
+    EditBox::setText(args[0].toString(), args[1].toInt32(), args[2].toInt32());
+    return true;
+}
+SE_BIND_FUNC(JSB_setInputBoxText)
+
+static bool JSB_getInputBoxSelection(se::State &s) {
+    int start = 0;
+    int end = 0;
+    if (EditBox::getSelection(start, end)) {
+        se::HandleObject range(se::Object::createPlainObject());
+        range->setProperty("start", se::Value(start));
+        range->setProperty("end", se::Value(end));
+        s.rval().setObject(range);
+    } else {
+        s.rval().setNull();
+    }
+    return true;
+}
+SE_BIND_FUNC(JSB_getInputBoxSelection)
+#endif
 #endif
 
 #if CC_PLATFORM == CC_PLATFORM_IOS
@@ -211,6 +256,11 @@ bool register_platform_bindings(se::Object *obj) {
     __jsbObj->defineFunction("isWindowFullScreen", _SE(JSB_isWindowFullScreen));
     __jsbObj->defineFunction("setWindowFullScreen", _SE(JSB_setWindowFullScreen));
     __jsbObj->defineFunction("setCursorStyle", _SE(JSB_setCursorStyle));
+    __jsbObj->defineFunction("selectFile", _SE(JSB_selectFile));
+#if CC_USE_EDITBOX
+    __jsbObj->defineFunction("setInputBoxText", _SE(JSB_setInputBoxText));
+    __jsbObj->defineFunction("getInputBoxSelection", _SE(JSB_getInputBoxSelection));
+#endif
 #elif CC_PLATFORM == CC_PLATFORM_IOS
     __jsbObj->defineFunction("hideInputBoxAccessory", _SE(JSB_hideInputBoxAccessory));
 #endif

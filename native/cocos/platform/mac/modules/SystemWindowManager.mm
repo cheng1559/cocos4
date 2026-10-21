@@ -24,6 +24,7 @@
 
 #include "SystemWindowManager.h"
 #include "SDL2/SDL_events.h"
+#include "engine/EngineEvents.h"
 #include "platform/BasePlatform.h"
 #include "platform/SDLHelper.h"
 #include "platform/interfaces/modules/ISystemWindowManager.h"
@@ -38,6 +39,13 @@ int SystemWindowManager::init() {
 void SystemWindowManager::processEvent() {
     SDL_Event sdlEvent;
     while (SDL_PollEvent(&sdlEvent) != 0) {
+        if (sdlEvent.type == SDL_QUIT) {
+            WindowEvent event;
+            event.type = WindowEvent::Type::CLOSE;
+            events::WindowEvent::broadcast(event);
+            BasePlatform::getPlatform()->exit();
+            return;
+        }
         SDL_Window *sdlWindow = SDL_GetWindowFromID(sdlEvent.window.windowID);
         // SDL_Event like SDL_QUIT does not associate a window
         if (!sdlWindow) {
@@ -47,6 +55,10 @@ void SystemWindowManager::processEvent() {
             CC_ASSERT(window);
             uint32_t windowId = window->getWindowId();
             SDLHelper::dispatchSDLEvent(windowId, sdlEvent);
+        }
+        if (sdlEvent.type == SDL_WINDOWEVENT && sdlEvent.window.event == SDL_WINDOWEVENT_CLOSE) {
+            BasePlatform::getPlatform()->exit();
+            return;
         }
     }
 }

@@ -27,6 +27,7 @@
 #include "base/std/container/string.h"
 #include "engine/EngineEvents.h"
 #include "platform/mac/MacPlatform.h"
+#include "SDL2/SDL_events.h"
 
 @interface AppDelegate () {
     NSWindow* _window;
@@ -42,7 +43,13 @@
 
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender
 {
-    return _platform->readyToExit() ? NSTerminateNow : NSTerminateLater;
+    if (!_platform) _platform = static_cast<cc::MacPlatform*>(cc::BasePlatform::getPlatform());
+    if (_platform->readyToExit()) return NSTerminateNow;
+    // Defer shutdown to the SDL loop so engine cleanup runs outside AppKit callbacks.
+    SDL_Event event{};
+    event.type = SDL_QUIT;
+    SDL_PushEvent(&event);
+    return NSTerminateLater;
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)theApplication {
