@@ -31,13 +31,21 @@
 #include "cocos/platform/interfaces/modules/ISystemWindow.h"
 
 #include <SDL2/SDL.h>
+#include <Windows.h>
+#include "cocos/platform/SDLHelper.h"
 
 #include <regex>
+#include <algorithm>
+#include <cmath>
 
 using namespace cc;
 
 static ccstd::unordered_map<ccstd::string, ccstd::string> fontFamilyNameMap;
 static SDL_Cursor *systemCursor{nullptr};
+static HWND aspectWindow{nullptr};
+static WNDPROC previousWindowProc{nullptr};
+static double minimumWindowAspect{0};
+static double maximumWindowAspect{0};
 
 const ccstd::unordered_map<ccstd::string, ccstd::string> &getFontFamilyNameMap() {
     return fontFamilyNameMap;
@@ -88,6 +96,86 @@ static SDL_Window *getMainWindow() {
     return SDL_GetWindowFromID(ISystemWindow::mainWindowId);
 }
 
+static void constrainWindowRect(HWND window, RECT &rect, bool vertical, UINT edge = 0) {
+    RECT frame{}, client{};
+    GetWindowRect(window, &frame);
+    GetClientRect(window, &client);
+    const LONG borderWidth = frame.right - frame.left - client.right;
+    const LONG borderHeight = frame.bottom - frame.top - client.bottom;
+    const double width = rect.right - rect.left - borderWidth, height = rect.bottom - rect.top - borderHeight;
+    if (width <= 0 || height <= 0) return;
+    if (edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT || edge == WMSZ_BOTTOMLEFT || edge == WMSZ_BOTTOMRIGHT) {
+        vertical = std::abs(height - client.bottom) > std::abs(width - client.right);
+    }
+    if (vertical) {
+        const LONG outerHeight = static_cast<LONG>(minimumWindowAspect == maximumWindowAspect
+            ? std::round(width / minimumWindowAspect)
+            : std::clamp(height, std::ceil(width / maximumWindowAspect), std::floor(width / minimumWindowAspect))) + borderHeight;
+        if (edge == WMSZ_TOP || edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT) rect.top = rect.bottom - outerHeight;
+        else rect.bottom = rect.top + outerHeight;
+    } else {
+        const LONG outerWidth = static_cast<LONG>(minimumWindowAspect == maximumWindowAspect
+            ? std::round(height * minimumWindowAspect)
+            : std::clamp(width, std::ceil(height * minimumWindowAspect), std::floor(height * maximumWindowAspect))) + borderWidth;
+        if (edge == WMSZ_LEFT || edge == WMSZ_TOPLEFT || edge == WMSZ_BOTTOMLEFT) rect.left = rect.right - outerWidth;
+        else rect.right = rect.left + outerWidth;
+    }
+}
+
+static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    auto *sdlWindow = getMainWindow();
+    if (sdlWindow && !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN) && !IsIconic(window)) {
+        if (message == WM_SIZING) {
+            constrainWindowRect(window, *reinterpret_cast<RECT *>(lParam), wParam == WMSZ_TOP || wParam == WMSZ_BOTTOM,
+                                static_cast<UINT>(wParam));
+            return TRUE;
+        }
+        if (message == WM_WINDOWPOSCHANGING) {
+            auto &position = *reinterpret_cast<WINDOWPOS *>(lParam);
+            if (!(position.flags & SWP_NOSIZE)) {
+                RECT frame{}, client{};
+                GetWindowRect(window, &frame);
+                GetClientRect(window, &client);
+                const LONG width = position.cx - (frame.right - frame.left - client.right);
+                const LONG height = position.cy - (frame.bottom - frame.top - client.bottom);
+                RECT rect{0, 0, position.cx, position.cy};
+                constrainWindowRect(window, rect, width < height * minimumWindowAspect);
+                if (!(position.flags & SWP_NOMOVE)) {
+                    position.x += (position.cx - rect.right) / 2;
+                    position.y += (position.cy - rect.bottom) / 2;
+                }
+                position.cx = rect.right;
+                position.cy = rect.bottom;
+            }
+        }
+    }
+    return CallWindowProcW(previousWindowProc, window, message, wParam, lParam);
+}
+
+static bool jsbSetWindowAspectRatio(se::State &s) {
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 2 && args[0].isNumber() && args[1].isNumber(), false, "Expected minimum and maximum window aspect ratios");
+    const double minimum = args[0].toDouble(), maximum = args[1].toDouble();
+    SE_PRECONDITION2(std::isfinite(minimum) && std::isfinite(maximum) && minimum > 0 && maximum >= minimum,
+                     false, "Invalid window aspect ratio range");
+    auto *sdlWindow = getMainWindow();
+    if (!sdlWindow) { s.rval().setBoolean(false); return true; }
+    const auto window = reinterpret_cast<HWND>(SDLHelper::getWindowHandle(sdlWindow));
+    minimumWindowAspect = minimum;
+    maximumWindowAspect = maximum;
+    if (!aspectWindow) {
+        previousWindowProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(aspectWindowProc)));
+        if (!previousWindowProc) { s.rval().setBoolean(false); return true; }
+        aspectWindow = window;
+    }
+    RECT rect{};
+    GetWindowRect(window, &rect);
+    SetWindowPos(window, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    s.rval().setBoolean(true);
+    return true;
+}
+SE_BIND_FUNC(jsbSetWindowAspectRatio)
+
 static bool jsbIsWindowFullScreen(se::State &s) {
     auto *window = getMainWindow();
     s.rval().setBoolean(window && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0);
@@ -137,6 +225,12 @@ SE_BIND_FUNC(jsbSetCursorStyle)
 
 bool register_platform_bindings(se::Object * /*obj*/) { // NOLINT(readability-identifier-naming)
     __jsbObj->defineFunction("loadFont", _SE(jsbLoadFont));
+    __jsbObj->defineFunction("setWindowAspectRatio", _SE(jsbSetWindowAspectRatio));
+    se::ScriptEngine::getInstance()->addBeforeCleanupHook([]() {
+        if (aspectWindow && IsWindow(aspectWindow)) SetWindowLongPtrW(aspectWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(previousWindowProc));
+        aspectWindow = nullptr;
+        previousWindowProc = nullptr;
+    });
     __jsbObj->defineFunction("isWindowFullScreen", _SE(jsbIsWindowFullScreen));
     __jsbObj->defineFunction("setWindowFullScreen", _SE(jsbSetWindowFullScreen));
     __jsbObj->defineFunction("setCursorStyle", _SE(jsbSetCursorStyle));

@@ -47,14 +47,13 @@ public:
 
     //queue buffer related stuff
     bool setTime(float time);
-    float getTime() { return _currTime; }
+    float getTime();
     bool setLoop(bool loop);
 
 protected:
     void setCache(AudioCache *cache);
     void rotateBufferThread(int offsetFrame);
     bool play2d();
-    void wakeupRotateThread();
 
     AudioCache *_audioCache;
 
@@ -76,8 +75,8 @@ protected:
     std::condition_variable _sleepCondition;
     std::mutex _sleepMutex;
     bool _timeDirty;
+    std::mutex _timeMutex;
     bool _isRotateThreadExited;
-    std::atomic_bool _needWakeupRotateThread;
 
     std::mutex _play2dMutex;
 
