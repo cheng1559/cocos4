@@ -267,7 +267,9 @@ void onParentViewTouched(const cc::CustomEvent &touchEvent){
 }
 
 - (BOOL)textFieldShouldReturn:(UITextField *)textField {
-    cc::EditBox::complete();
+    callJSFunc("confirm", [textField.text UTF8String]);
+    if (!g_confirmHold)
+        cc::EditBox::complete();
     return YES;
 }
 @end
@@ -276,15 +278,16 @@ void onParentViewTouched(const cc::CustomEvent &touchEvent){
 static ButtonHandler*           btnHandler = nil;
 @interface InputBoxPair : NSObject
 @property(readwrite) id inputOnView;
-@property(readwrite) id inputOnToolbar;
+// Custom UI can remove the accessory toolbar while this input pair is still in use.
+@property(readwrite, retain) id inputOnToolbar;
 @property(readwrite) id inputDelegate;
 @end
 @implementation InputBoxPair
 - (void)dealloc {
-    [super dealloc];
     [_inputOnView release];
     [_inputOnToolbar release];
     [_inputDelegate release];
+    [super dealloc];
 }
 @end
 
@@ -352,10 +355,10 @@ static EditboxManager *instance = nil;
 }
 - (UIBarButtonItem*) setInputWidthOf: (UIToolbar*)toolbar{
     CGFloat totalItemsWidth = ITEM_MARGIN_WIDTH;
-    UIBarButtonItem *textViewBarButtonItem;
+    UIBarButtonItem *textViewBarButtonItem = nil;
     UIView *view;
     for (UIBarButtonItem *barButtonItem in toolbar.items) {
-        if ((view = [barButtonItem valueForKey:@"view"])) {
+        if ((view = barButtonItem.customView)) {
             if ([view isKindOfClass:[UITextView class]] || [view isKindOfClass:[UITextField class]]) {
                 textViewBarButtonItem = barButtonItem;
             } else if ([view isKindOfClass:[UIButton class]]) {
@@ -393,6 +396,7 @@ static EditboxManager *instance = nil;
     TextViewDelegate* delegate = [[TextViewDelegate alloc] initWithPairs:[inputbox inputOnView] and:textView];
     inputbox.inputDelegate = delegate;
     textView.delegate = delegate;
+    ((UITextView*)[inputbox inputOnView]).delegate = delegate;
     UIBarButtonItem *textViewItem = [[UIBarButtonItem alloc] initWithCustomView:textView];
     
     if (!btnHandler){
@@ -446,6 +450,9 @@ static EditboxManager *instance = nil;
     textField.delegate = delegate;
     inputbox.inputDelegate = delegate;
     [textField addTarget:delegate action:@selector(textFieldDidChange:) forControlEvents:UIControlEventEditingChanged];
+    UITextField* inputOnView = [inputbox inputOnView];
+    inputOnView.delegate = delegate;
+    [inputOnView addTarget:delegate action:@selector(textFieldDidChange:) forControlEvents:UIControlEventEditingChanged];
     UIBarButtonItem *textFieldItem = [[UIBarButtonItem alloc] initWithCustomView:textField];
     
     if (!btnHandler){
@@ -569,7 +576,8 @@ static EditboxManager *instance = nil;
     [view addSubview:[curView inputOnView]];
     [[curView inputOnView] becomeFirstResponder];
      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-         if(![[curView inputOnToolbar] becomeFirstResponder]) {
+         UIView *inputView = [curView inputOnView];
+         if(inputView.window && inputView.inputAccessoryView && ![[curView inputOnToolbar] becomeFirstResponder]) {
              CC_LOG_ERROR("inputOnToolbar becomeFirstResponder error!");
          }
     });

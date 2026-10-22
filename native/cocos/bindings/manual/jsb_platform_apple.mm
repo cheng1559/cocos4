@@ -39,6 +39,7 @@
 #include "cocos/ui/edit-box/EditBox.h"
 #elif CC_PLATFORM == CC_PLATFORM_IOS
 #import <UIKit/UIKit.h>
+#import <MobileCoreServices/MobileCoreServices.h>
 #endif
 #include <regex>
 
@@ -126,6 +127,12 @@ static bool JSB_loadFont(se::State &s) {
 }
 SE_BIND_FUNC(JSB_loadFont)
 
+static void completeFileSelection(const se::Value &callback, NSString *path, NSString *error = nil) {
+    se::AutoHandleScope scope;
+    callback.toObject()->call({path ? se::Value(path.UTF8String) : se::Value::Null,
+                              error ? se::Value(error.UTF8String) : se::Value::Null}, nullptr);
+}
+
 #if CC_PLATFORM == CC_PLATFORM_MACOS
 static SDL_Window *getMainWindow() {
     return SDL_GetWindowFromID(ISystemWindow::mainWindowId);
@@ -180,18 +187,15 @@ SE_BIND_FUNC(JSB_setCursorStyle)
 
 static bool JSB_selectFile(se::State &s) {
     const auto &args = s.args();
-    SE_PRECONDITION2(args.size() == 1 && args[0].isString(), false, "Expected a file extension");
+    SE_PRECONDITION2(args.size() == 2 && args[0].isString() && args[1].isObject() && args[1].toObject()->isFunction(), false, "Expected a file extension and callback");
     NSOpenPanel *panel = [NSOpenPanel openPanel];
     panel.canChooseFiles = YES;
     panel.canChooseDirectories = NO;
     panel.allowsMultipleSelection = NO;
     panel.allowedFileTypes = @[[NSString stringWithUTF8String:args[0].toString().c_str()]];
     panel.allowsOtherFileTypes = NO;
-    if ([panel runModal] == NSModalResponseOK) {
-        s.rval().setString(panel.URL.path.UTF8String);
-    } else {
-        s.rval().setNull();
-    }
+    const bool selected = [panel runModal] == NSModalResponseOK;
+    completeFileSelection(args[1], selected ? panel.URL.path : nil);
     return true;
 }
 SE_BIND_FUNC(JSB_selectFile)
@@ -223,6 +227,70 @@ SE_BIND_FUNC(JSB_getInputBoxSelection)
 #endif
 
 #if CC_PLATFORM == CC_PLATFORM_IOS
+@interface CCDocumentPickerDelegate : NSObject <UIDocumentPickerDelegate>
+@end
+
+static CCDocumentPickerDelegate *filePickerDelegate = nil;
+static UIDocumentPickerViewController *filePicker = nil;
+static se::Value filePickerCallback;
+
+static void clearFilePicker() {
+    filePicker.delegate = nil;
+    [filePicker release];
+    filePicker = nil;
+    filePickerCallback.setUndefined();
+}
+
+@implementation CCDocumentPickerDelegate
+- (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
+    se::Value callback = std::move(filePickerCallback);
+    clearFilePicker();
+    NSURL *url = urls.firstObject;
+    if (url.isFileURL && [NSFileManager.defaultManager isReadableFileAtPath:url.path]) {
+        completeFileSelection(callback, url.path);
+    } else {
+        completeFileSelection(callback, nil, @"Could not read the selected file");
+    }
+}
+
+- (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
+    se::Value callback = std::move(filePickerCallback);
+    clearFilePicker();
+    completeFileSelection(callback, nil);
+}
+@end
+
+static bool JSB_selectFile(se::State &s) {
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 2 && args[0].isString() && args[1].isObject() && args[1].toObject()->isFunction(), false, "Expected a file extension and callback");
+    if (filePicker) {
+        completeFileSelection(args[1], nil, @"A file selection is already open");
+        return true;
+    }
+    UIViewController *presenter = UIApplication.sharedApplication.keyWindow.rootViewController;
+    while (presenter.presentedViewController) presenter = presenter.presentedViewController;
+    if (!presenter.view.window || presenter.isBeingDismissed) {
+        completeFileSelection(args[1], nil, @"File selection has no active window");
+        return true;
+    }
+    NSString *extension = [NSString stringWithUTF8String:args[0].toString().c_str()];
+    CFStringRef type = UTTypeCreatePreferredIdentifierForTag(kUTTagClassFilenameExtension, (CFStringRef)extension, nullptr);
+    if (!type) {
+        completeFileSelection(args[1], nil, @"Unknown file extension");
+        return true;
+    }
+    // Import a local copy so cloud/provider files are readable without security-scoped access.
+    filePicker = [[UIDocumentPickerViewController alloc] initWithDocumentTypes:@[(NSString *)type] inMode:UIDocumentPickerModeImport];
+    CFRelease(type);
+    if (!filePickerDelegate) filePickerDelegate = [CCDocumentPickerDelegate new];
+    filePicker.delegate = filePickerDelegate;
+    filePicker.allowsMultipleSelection = NO;
+    filePickerCallback.setObject(args[1].toObject(), true);
+    [presenter presentViewController:filePicker animated:YES completion:nil];
+    return true;
+}
+SE_BIND_FUNC(JSB_selectFile)
+
 static bool JSB_hideInputBoxAccessory(se::State &s) {
     bool changed = false;
     for (UIWindow *window in UIApplication.sharedApplication.windows) {
@@ -262,6 +330,13 @@ bool register_platform_bindings(se::Object *obj) {
     __jsbObj->defineFunction("getInputBoxSelection", _SE(JSB_getInputBoxSelection));
 #endif
 #elif CC_PLATFORM == CC_PLATFORM_IOS
+    __jsbObj->defineFunction("selectFile", _SE(JSB_selectFile));
+    se::ScriptEngine::getInstance()->addBeforeCleanupHook([]() {
+        [filePicker dismissViewControllerAnimated:NO completion:nil];
+        clearFilePicker();
+        [filePickerDelegate release];
+        filePickerDelegate = nil;
+    });
     __jsbObj->defineFunction("hideInputBoxAccessory", _SE(JSB_hideInputBoxAccessory));
 #endif
     return true;

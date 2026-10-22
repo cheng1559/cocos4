@@ -56,10 +56,9 @@ extern int cocos_main(int argc, const char **argv);
 
 - (instancetype)initWithApp:(cc::IOSPlatform *)platform fps:(int)fps {
     if (self = [super init]) {
-        _fps = fps;
         _platform = platform;
         _displayLink = [NSClassFromString(@"CADisplayLink") displayLinkWithTarget:self selector:@selector(renderScene:)];
-        _displayLink.preferredFramesPerSecond = _fps;
+        [self changeFPS:fps];
     }
     return self;
 }
@@ -77,11 +76,16 @@ extern int cocos_main(int argc, const char **argv);
 }
 
 - (void)changeFPS:(int)fps {
-    _displayLink.preferredFramesPerSecond = fps;
+    _fps = MIN(fps, (int)UIScreen.mainScreen.maximumFramesPerSecond);
+    if (@available(iOS 15.0, *)) {
+        _displayLink.preferredFrameRateRange = CAFrameRateRangeMake(_fps, _fps, _fps);
+    } else {
+        _displayLink.preferredFramesPerSecond = _fps;
+    }
 }
 
 - (int)getFPS {
-    return (int)_displayLink.preferredFramesPerSecond;
+    return _fps;
 }
 
 - (void)renderScene:(id)sender {
