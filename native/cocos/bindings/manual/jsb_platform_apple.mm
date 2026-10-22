@@ -30,6 +30,7 @@
 #include "cocos/bindings/manual/jsb_global.h"
 #include "cocos/platform/FileUtils.h"
 #include "cocos/platform/interfaces/modules/ISystemWindow.h"
+#include "cocos/ui/edit-box/EditBox.h"
 
 #import <Foundation/Foundation.h>
 #import <CoreText/CoreText.h>
@@ -38,7 +39,6 @@
 #import <objc/runtime.h>
 #include <SDL2/SDL.h>
 #include "cocos/platform/SDLHelper.h"
-#include "cocos/ui/edit-box/EditBox.h"
 #elif CC_PLATFORM == CC_PLATFORM_IOS
 #import <UIKit/UIKit.h>
 #import <MobileCoreServices/MobileCoreServices.h>
@@ -291,6 +291,7 @@ static bool JSB_selectFile(se::State &s) {
     return true;
 }
 SE_BIND_FUNC(JSB_selectFile)
+#endif
 
 #if CC_USE_EDITBOX
 static bool JSB_setInputBoxText(se::State &s) {
@@ -315,7 +316,6 @@ static bool JSB_getInputBoxSelection(se::State &s) {
     return true;
 }
 SE_BIND_FUNC(JSB_getInputBoxSelection)
-#endif
 #endif
 
 #if CC_PLATFORM == CC_PLATFORM_IOS
@@ -383,35 +383,21 @@ static bool JSB_selectFile(se::State &s) {
 }
 SE_BIND_FUNC(JSB_selectFile)
 
+#if CC_USE_EDITBOX
 static bool JSB_hideInputBoxAccessory(se::State &s) {
-    bool changed = false;
-    for (UIWindow *window in UIApplication.sharedApplication.windows) {
-        NSMutableArray<UIView *> *views = [NSMutableArray arrayWithObject:window];
-        while (views.count > 0) {
-            UIView *view = views.lastObject;
-            [views removeLastObject];
-            [views addObjectsFromArray:view.subviews];
-            if ([view isKindOfClass:UITextField.class] || [view isKindOfClass:UITextView.class]) {
-                id input = view;
-                [input setInputAccessoryView:nil];
-                if ([input respondsToSelector:@selector(inputAssistantItem)]) {
-                    UITextInputAssistantItem *assistant = [input inputAssistantItem];
-                    assistant.leadingBarButtonGroups = @[];
-                    assistant.trailingBarButtonGroups = @[];
-                }
-                [input reloadInputViews];
-                changed = true;
-            }
-        }
-    }
-    s.rval().setBoolean(changed);
+    s.rval().setBoolean(EditBox::hideAccessory());
     return true;
 }
 SE_BIND_FUNC(JSB_hideInputBoxAccessory)
 #endif
+#endif
 
 bool register_platform_bindings(se::Object *obj) {
     __jsbObj->defineFunction("loadFont", _SE(JSB_loadFont));
+#if CC_USE_EDITBOX
+    __jsbObj->defineFunction("setInputBoxText", _SE(JSB_setInputBoxText));
+    __jsbObj->defineFunction("getInputBoxSelection", _SE(JSB_getInputBoxSelection));
+#endif
 #if CC_PLATFORM == CC_PLATFORM_MACOS
     __jsbObj->defineFunction("setWindowAspectRatio", _SE(JSB_setWindowAspectRatio));
     se::ScriptEngine::getInstance()->addBeforeCleanupHook([]() {
@@ -427,8 +413,7 @@ bool register_platform_bindings(se::Object *obj) {
     __jsbObj->defineFunction("setCursorStyle", _SE(JSB_setCursorStyle));
     __jsbObj->defineFunction("selectFile", _SE(JSB_selectFile));
 #if CC_USE_EDITBOX
-    __jsbObj->defineFunction("setInputBoxText", _SE(JSB_setInputBoxText));
-    __jsbObj->defineFunction("getInputBoxSelection", _SE(JSB_getInputBoxSelection));
+    __jsbObj->setProperty("onInputBoxKey", se::Value::Null);
 #endif
 #elif CC_PLATFORM == CC_PLATFORM_IOS
     __jsbObj->defineFunction("selectFile", _SE(JSB_selectFile));
@@ -438,7 +423,9 @@ bool register_platform_bindings(se::Object *obj) {
         [filePickerDelegate release];
         filePickerDelegate = nil;
     });
+#if CC_USE_EDITBOX
     __jsbObj->defineFunction("hideInputBoxAccessory", _SE(JSB_hideInputBoxAccessory));
+#endif
 #endif
     return true;
 }
