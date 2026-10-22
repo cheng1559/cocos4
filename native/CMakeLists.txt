@@ -3754,6 +3754,7 @@ if(APPLE)
 
         target_link_libraries(${ENGINE_NAME} PUBLIC
             "-framework UIKit"
+            "-framework MobileCoreServices"
             "-framework AVKit"
             "-framework WebKit"
             "-framework CoreVideo"
