@@ -67,11 +67,13 @@ const bool INPUTBOX_HIDDEN = true; // Toggle if Inputbox is visible
 /*************************************************************************
  Inner class declarations.
  ************************************************************************/
+@class InputBoxPair;
 @interface EditboxManager : NSObject
 + (instancetype)sharedInstance;
 - (void)        show:(const cc::EditBox::ShowInfo*)showInfo;
 - (void)        hide;
-- (UIView*)     getCurrentViewInUse;
+- (InputBoxPair*)getCurrentViewInUse;
+- (id)          getCurrentInput;
 - (NSString*)   getCurrentText;
 @end
 
@@ -96,6 +98,7 @@ const bool INPUTBOX_HIDDEN = true; // Toggle if Inputbox is visible
 namespace {
 static bool g_isMultiline{false};
 static bool g_confirmHold{false};
+static bool g_keepFocusOnTouch{false};
 static int g_maxLength{INT_MAX};
 se::Value textInputCallback;
 
@@ -229,8 +232,8 @@ void onParentViewTouched(const cc::CustomEvent &touchEvent){
         NSRange rangeIndex = [textView.text rangeOfComposedCharacterSequenceAtIndex:g_maxLength];
         textView.text = [textView.text substringToIndex:rangeIndex.location];
     }
-    tViewOnView.text = textView.text;
-    tViewOnToolbar.text = textView.text;
+    if (tViewOnView != textView) tViewOnView.text = textView.text;
+    if (tViewOnToolbar != textView) tViewOnToolbar.text = textView.text;
     callJSFunc("input", [textView.text UTF8String]);
 }
 @end
@@ -261,8 +264,8 @@ void onParentViewTouched(const cc::CustomEvent &touchEvent){
         NSRange rangeIndex = [textField.text rangeOfComposedCharacterSequenceAtIndex:g_maxLength];
         textField.text = [textField.text substringToIndex:rangeIndex.location];
     }
-    textFieldOnView.text = textField.text;
-    textFieldOntoolbar.text = textField.text;
+    if (textFieldOnView != textField) textFieldOnView.text = textField.text;
+    if (textFieldOntoolbar != textField) textFieldOntoolbar.text = textField.text;
     callJSFunc("input", [textField.text UTF8String]);
 }
 
@@ -338,7 +341,7 @@ static EditboxManager *instance = nil;
         });
         //"onTouchStart" is a sub event for TouchEvent, so we can only add listener for this sub event rather than TouchEvent itself.
         touchListener.bind([&](const cc::TouchEvent& event) {
-            if(event.type == cc::TouchEvent::Type::BEGAN) {
+            if(!g_keepFocusOnTouch && event.type == cc::TouchEvent::Type::BEGAN) {
                 cc::EditBox::complete();
             }
         });
@@ -564,6 +567,7 @@ static EditboxManager *instance = nil;
     g_maxLength = showInfo->maxLength;
     g_isMultiline = showInfo->isMultiline;
     g_confirmHold = showInfo->confirmHold;
+    g_keepFocusOnTouch = false;
     
     if (g_isMultiline) {
         curView = [self createTextView:showInfo];
@@ -597,10 +601,11 @@ static EditboxManager *instance = nil;
 - (InputBoxPair*) getCurrentViewInUse {
     return curView;
 }
+- (id) getCurrentInput {
+    return [[curView inputOnToolbar] isFirstResponder] ? [curView inputOnToolbar] : [curView inputOnView];
+}
 - (NSString*) getCurrentText {
-    if (g_isMultiline)
-        return [(UITextView*)[curView inputOnToolbar] text];
-    return [(UITextField*)[curView inputOnToolbar] text];
+    return [[self getCurrentInput] text];
 }
 
 
@@ -621,6 +626,46 @@ static EditboxManager *instance = nil;
 
 namespace cc{
 bool EditBox::_isShown = false;
+bool EditBox::getSelection(int &start, int &end) {
+    if (!_isShown) return false;
+    id<UITextInput> input = [[EditboxManager sharedInstance] getCurrentInput];
+    UITextRange *range = input.selectedTextRange;
+    if (!range) return false;
+    start = static_cast<int>([input offsetFromPosition:input.beginningOfDocument toPosition:range.start]);
+    end = static_cast<int>([input offsetFromPosition:input.beginningOfDocument toPosition:range.end]);
+    return true;
+}
+
+void EditBox::setText(const ccstd::string &text, int start, int end) {
+    if (!_isShown) return;
+    EditboxManager *manager = [EditboxManager sharedInstance];
+    NSString *value = [NSString stringWithUTF8String:text.c_str()];
+    InputBoxPair *pair = [manager getCurrentViewInUse];
+    for (id input in @[[pair inputOnView], [pair inputOnToolbar]]) {
+        // Reassigning the active editor's text also moves its caret and disrupts marked text.
+        if (![[input text] isEqualToString:value]) [input setText:value];
+    }
+    id<UITextInput> input = [manager getCurrentInput];
+    const NSUInteger from = MIN(value.length, MAX(0, MIN(start, end)));
+    const NSUInteger to = MIN(value.length, MAX(0, MAX(start, end)));
+    UITextPosition *begin = [input positionFromPosition:input.beginningOfDocument offset:from];
+    UITextPosition *finish = [input positionFromPosition:input.beginningOfDocument offset:to];
+    input.selectedTextRange = [input textRangeFromPosition:begin toPosition:finish];
+}
+
+bool EditBox::hideAccessory() {
+    if (!_isShown) return false;
+    // Custom UI owns outside-click dismissal and selection; keep the same native editor alive.
+    g_keepFocusOnTouch = true;
+    id input = [[EditboxManager sharedInstance] getCurrentInput];
+    [input setInputAccessoryView:nil];
+    UITextInputAssistantItem *assistant = [input inputAssistantItem];
+    assistant.leadingBarButtonGroups = @[];
+    assistant.trailingBarButtonGroups = @[];
+    [input reloadInputViews];
+    return true;
+}
+
 void EditBox::show(const cc::EditBox::ShowInfo &showInfo) {
     [[EditboxManager sharedInstance] show:&showInfo];
     EditBox::_isShown = true;
