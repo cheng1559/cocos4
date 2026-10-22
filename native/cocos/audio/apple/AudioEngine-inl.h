@@ -71,8 +71,6 @@ private:
     void play2dImpl(AudioCache *cache, int audioID);
     ALuint findValidSource();
 
-    static ALvoid myAlSourceNotificationCallback(ALuint sid, ALuint notificationID, ALvoid *userData);
-
     ALuint _alSources[MAX_AUDIOINSTANCES];
 
     //source,used

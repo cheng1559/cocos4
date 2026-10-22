@@ -45,23 +45,6 @@ using namespace cc;
 
 static ALCdevice *s_ALDevice = nullptr;
 static ALCcontext *s_ALContext = nullptr;
-static AudioEngineImpl *s_instance = nullptr;
-
-typedef ALvoid (*alSourceNotificationProc)(ALuint sid, ALuint notificationID, ALvoid *userData);
-typedef ALenum (*alSourceAddNotificationProcPtr)(ALuint sid, ALuint notificationID, alSourceNotificationProc notifyProc, ALvoid *userData);
-static ALenum alSourceAddNotificationExt(ALuint sid, ALuint notificationID, alSourceNotificationProc notifyProc, ALvoid *userData) {
-    static alSourceAddNotificationProcPtr proc = nullptr;
-
-    if (proc == nullptr) {
-        proc = (alSourceAddNotificationProcPtr)alcGetProcAddress(nullptr, "alSourceAddNotification");
-    }
-
-    if (proc) {
-        return proc(sid, notificationID, notifyProc, userData);
-    }
-    return AL_INVALID_VALUE;
-}
-
 #if CC_PLATFORM == CC_PLATFORM_IOS
 @interface AudioEngineSessionHandler : NSObject {
 }
@@ -141,26 +124,8 @@ static ALenum alSourceAddNotificationExt(ALuint sid, ALuint notificationID, alSo
 static id s_AudioEngineSessionHandler = nullptr;
 #endif
 
-ALvoid AudioEngineImpl::myAlSourceNotificationCallback(ALuint sid, ALuint notificationID, ALvoid *userData) {
-    // Currently, we only care about AL_BUFFERS_PROCESSED event
-    if (notificationID != AL_BUFFERS_PROCESSED)
-        return;
-
-    AudioPlayer *player = nullptr;
-    s_instance->_threadMutex.lock();
-    for (const auto &e : s_instance->_audioPlayers) {
-        player = e.second;
-        if (player->_alSource == sid && player->_streamingSource) {
-            player->wakeupRotateThread();
-        }
-    }
-    s_instance->_threadMutex.unlock();
-}
-
 AudioEngineImpl::AudioEngineImpl()
-: _lazyInitLoop(true), _currentAudioID(0) {
-    s_instance = this;
-}
+: _lazyInitLoop(true), _currentAudioID(0) {}
 
 AudioEngineImpl::~AudioEngineImpl() {
     if (auto sche = _scheduler.lock()) {
@@ -181,15 +146,16 @@ AudioEngineImpl::~AudioEngineImpl() {
 
         alcMakeContextCurrent(nullptr);
         alcDestroyContext(s_ALContext);
+        s_ALContext = nullptr;
     }
     if (s_ALDevice) {
         alcCloseDevice(s_ALDevice);
+        s_ALDevice = nullptr;
     }
 
 #if CC_PLATFORM == CC_PLATFORM_IOS
     [s_AudioEngineSessionHandler release];
 #endif
-    s_instance = nullptr;
 }
 
 bool AudioEngineImpl::init() {
@@ -214,7 +180,6 @@ bool AudioEngineImpl::init() {
 
             for (int i = 0; i < MAX_AUDIOINSTANCES; ++i) {
                 _unusedSourcesPool.push_back(_alSources[i]);
-                alSourceAddNotificationExt(_alSources[i], AL_BUFFERS_PROCESSED, myAlSourceNotificationCallback, nullptr);
             }
 
             // fixed #16170: Random crash in alGenBuffers(AudioCache::readDataTask) at startup

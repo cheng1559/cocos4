@@ -26,6 +26,9 @@
 
 #define LOG_TAG "AudioPlayer"
 
+#include <algorithm>
+#include <cmath>
+
 #import <Foundation/Foundation.h>
 #include "audio/apple/AudioCache.h"
 #include "audio/apple/AudioDecoder.h"
@@ -48,7 +51,7 @@ unsigned int __idIndex = 0;
 }
 
 AudioPlayer::AudioPlayer()
-: _audioCache(nullptr), _pitch(1.0F), _finishCallbak(nullptr), _isDestroyed(false), _removeByAudioEngine(false), _ready(false), _currTime(0.0f), _streamingSource(false), _rotateBufferThread(nullptr), _timeDirty(false), _isRotateThreadExited(false), _needWakeupRotateThread(false), _id(++__idIndex) {
+: _audioCache(nullptr), _pitch(1.0F), _finishCallbak(nullptr), _isDestroyed(false), _removeByAudioEngine(false), _ready(false), _currTime(0.0f), _streamingSource(false), _rotateBufferThread(nullptr), _timeDirty(false), _isRotateThreadExited(false), _id(++__idIndex) {
     memset(_bufferIds, 0, sizeof(_bufferIds));
 }
 
@@ -256,6 +259,7 @@ void AudioPlayer::rotateBufferThread(int offsetFrame) {
         bool needToExitThread = false;
 
         while (!_isDestroyed) {
+            std::unique_lock<std::mutex> timeLock(_timeMutex);
             alGetSourcei(_alSource, AL_SOURCE_STATE, &sourceState);
             /* On IOS, audio state will lie, when the system is not fully foreground,
              * openAl will process the buffer in queue, but our condition cannot make sure that the audio
@@ -310,16 +314,14 @@ void AudioPlayer::rotateBufferThread(int offsetFrame) {
                 }
             }
 
+            timeLock.unlock();
             std::unique_lock<std::mutex> lk(_sleepMutex);
             if (_isDestroyed || needToExitThread) {
                 break;
             }
 
-            if (!_needWakeupRotateThread) {
-                _sleepCondition.wait_for(lk, std::chrono::milliseconds(rotateSleepTime));
-            }
-
-            _needWakeupRotateThread = false;
+            // Poll at half a buffer interval; OpenAL notifications can outlive source teardown.
+            _sleepCondition.wait_for(lk, std::chrono::milliseconds(rotateSleepTime));
         }
 
     } while (false);
@@ -328,11 +330,6 @@ void AudioPlayer::rotateBufferThread(int offsetFrame) {
     decoder.close();
     free(tmpBuffer);
     _isRotateThreadExited = true;
-}
-
-void AudioPlayer::wakeupRotateThread() {
-    _needWakeupRotateThread = true;
-    _sleepCondition.notify_all();
 }
 
 bool AudioPlayer::setLoop(bool loop) {
@@ -345,6 +342,7 @@ bool AudioPlayer::setLoop(bool loop) {
 }
 
 bool AudioPlayer::setTime(float time) {
+    std::lock_guard<std::mutex> lock(_timeMutex);
     if (!_isDestroyed && time >= 0.0f && time < _audioCache->_duration) {
         _currTime = time;
         _timeDirty = true;
@@ -352,4 +350,18 @@ bool AudioPlayer::setTime(float time) {
         return true;
     }
     return false;
+}
+
+float AudioPlayer::getTime() {
+    std::lock_guard<std::mutex> lock(_timeMutex);
+    if (_timeDirty) return _currTime;
+
+    // _currTime is the start of the queued buffers, not the audible position.
+    ALfloat offset = 0.0F;
+    alGetSourcef(_alSource, AL_SEC_OFFSET, &offset);
+    const float time = _currTime + (alGetError() == AL_NO_ERROR ? offset : 0.0F);
+    if (_loop && _audioCache->_duration > 0.0F) {
+        return std::fmod(time, _audioCache->_duration);
+    }
+    return std::min(time, _audioCache->_duration);
 }

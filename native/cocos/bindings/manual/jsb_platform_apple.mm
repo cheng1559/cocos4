@@ -35,19 +35,88 @@
 #import <CoreText/CoreText.h>
 #if CC_PLATFORM == CC_PLATFORM_MACOS
 #import <AppKit/AppKit.h>
+#import <objc/runtime.h>
 #include <SDL2/SDL.h>
+#include "cocos/platform/SDLHelper.h"
 #include "cocos/ui/edit-box/EditBox.h"
 #elif CC_PLATFORM == CC_PLATFORM_IOS
 #import <UIKit/UIKit.h>
 #import <MobileCoreServices/MobileCoreServices.h>
 #endif
 #include <regex>
+#include <algorithm>
+#include <cmath>
 
 using namespace cc;
 
 static ccstd::unordered_map<ccstd::string, ccstd::string> _fontFamilyNameMap;
 #if CC_PLATFORM == CC_PLATFORM_MACOS
 static SDL_Cursor *systemCursor{nullptr};
+
+// Keep SDL's delegate responsible for input, close, focus and fullscreen events.
+@interface CCWindowAspectDelegate : NSObject <NSWindowDelegate>
+@property(nonatomic, retain) id<NSWindowDelegate> originalDelegate;
+@property(nonatomic, assign) SDL_Window *sdlWindow;
+@property(nonatomic, assign) double minimumAspect;
+@property(nonatomic, assign) double maximumAspect;
+@end
+
+@implementation CCWindowAspectDelegate
+- (BOOL)respondsToSelector:(SEL)selector {
+    return [super respondsToSelector:selector] || [self.originalDelegate respondsToSelector:selector];
+}
+- (id)forwardingTargetForSelector:(SEL)selector {
+    return self.originalDelegate;
+}
+- (NSSize)constrainSize:(NSSize)size forWindow:(NSWindow *)window vertically:(BOOL)vertical {
+    if ((window.styleMask & NSWindowStyleMaskFullScreen) ||
+        (SDL_GetWindowFlags(self.sdlWindow) & SDL_WINDOW_FULLSCREEN)) return size;
+    NSSize content = [window contentRectForFrameRect:NSMakeRect(0, 0, size.width, size.height)].size;
+    if (content.width <= 0 || content.height <= 0) return size;
+    if (vertical) {
+        content.height = self.minimumAspect == self.maximumAspect
+            ? std::round(content.width / self.minimumAspect)
+            : std::clamp(content.height, std::ceil(content.width / self.maximumAspect),
+                         std::floor(content.width / self.minimumAspect));
+    } else {
+        content.width = self.minimumAspect == self.maximumAspect
+            ? std::round(content.height * self.minimumAspect)
+            : std::clamp(content.width, std::ceil(content.height * self.minimumAspect),
+                         std::floor(content.height * self.maximumAspect));
+    }
+    return [window frameRectForContentRect:NSMakeRect(0, 0, content.width, content.height)].size;
+}
+- (NSSize)windowWillResize:(NSWindow *)window toSize:(NSSize)size {
+    if ([self.originalDelegate respondsToSelector:_cmd]) {
+        size = [self.originalDelegate windowWillResize:window toSize:size];
+    }
+    const NSSize content = [window contentRectForFrameRect:NSMakeRect(0, 0, size.width, size.height)].size;
+    const NSSize current = window.contentView.frame.size;
+    return [self constrainSize:size forWindow:window
+                   vertically:std::abs(content.height - current.height) > std::abs(content.width - current.width)];
+}
+- (void)windowDidResize:(NSNotification *)notification {
+    NSWindow *window = notification.object;
+    NSRect frame = window.frame;
+    const NSSize content = window.contentView.frame.size;
+    // Programmatic resize/zoom stays inside the requested frame, including portrait displays.
+    const NSSize size = [self constrainSize:frame.size forWindow:window
+                               vertically:content.width < content.height * self.minimumAspect];
+    if (!NSEqualSizes(frame.size, size)) {
+        frame.origin.y += frame.size.height - size.height;
+        frame.size = size;
+        [window setFrame:frame display:YES];
+        return;
+    }
+    if ([self.originalDelegate respondsToSelector:_cmd]) [self.originalDelegate windowDidResize:notification];
+}
+- (void)dealloc {
+    [_originalDelegate release];
+    [super dealloc];
+}
+@end
+
+static char windowAspectDelegateKey;
 #endif
 
 const ccstd::unordered_map<ccstd::string, ccstd::string> &getFontFamilyNameMap() {
@@ -138,6 +207,32 @@ static SDL_Window *getMainWindow() {
     return SDL_GetWindowFromID(ISystemWindow::mainWindowId);
 }
 
+static bool JSB_setWindowAspectRatio(se::State &s) {
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 2 && args[0].isNumber() && args[1].isNumber(), false, "Expected minimum and maximum window aspect ratios");
+    const double minimum = args[0].toDouble(), maximum = args[1].toDouble();
+    SE_PRECONDITION2(std::isfinite(minimum) && std::isfinite(maximum) && minimum > 0 && maximum >= minimum,
+                     false, "Invalid window aspect ratio range");
+    auto *sdlWindow = getMainWindow();
+    if (!sdlWindow) { s.rval().setBoolean(false); return true; }
+    auto *window = reinterpret_cast<NSWindow *>(SDLHelper::getWindowHandle(sdlWindow));
+    auto *delegate = (CCWindowAspectDelegate *)objc_getAssociatedObject(window, &windowAspectDelegateKey);
+    if (!delegate) {
+        delegate = [[CCWindowAspectDelegate alloc] init];
+        delegate.originalDelegate = window.delegate;
+        delegate.sdlWindow = sdlWindow;
+        objc_setAssociatedObject(window, &windowAspectDelegateKey, delegate, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [delegate release];
+    }
+    delegate.minimumAspect = minimum;
+    delegate.maximumAspect = maximum;
+    window.delegate = delegate;
+    [delegate windowDidResize:[NSNotification notificationWithName:NSWindowDidResizeNotification object:window]];
+    s.rval().setBoolean(true);
+    return true;
+}
+SE_BIND_FUNC(JSB_setWindowAspectRatio)
+
 static bool JSB_isWindowFullScreen(se::State &s) {
     auto *window = getMainWindow();
     s.rval().setBoolean(window && (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0);
@@ -152,9 +247,6 @@ static bool JSB_setWindowFullScreen(se::State &s) {
     auto *window = getMainWindow();
     const bool success = window && SDL_SetWindowFullscreen(
         window, args[0].toBoolean() ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) == 0;
-    if (success && !args[0].toBoolean()) {
-        SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-    }
     s.rval().setBoolean(success);
     return true;
 }
@@ -321,6 +413,15 @@ SE_BIND_FUNC(JSB_hideInputBoxAccessory)
 bool register_platform_bindings(se::Object *obj) {
     __jsbObj->defineFunction("loadFont", _SE(JSB_loadFont));
 #if CC_PLATFORM == CC_PLATFORM_MACOS
+    __jsbObj->defineFunction("setWindowAspectRatio", _SE(JSB_setWindowAspectRatio));
+    se::ScriptEngine::getInstance()->addBeforeCleanupHook([]() {
+        auto *sdlWindow = getMainWindow();
+        if (!sdlWindow) return;
+        auto *window = reinterpret_cast<NSWindow *>(SDLHelper::getWindowHandle(sdlWindow));
+        auto *delegate = (CCWindowAspectDelegate *)objc_getAssociatedObject(window, &windowAspectDelegateKey);
+        if (delegate && window.delegate == delegate) window.delegate = delegate.originalDelegate;
+        objc_setAssociatedObject(window, &windowAspectDelegateKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    });
     __jsbObj->defineFunction("isWindowFullScreen", _SE(JSB_isWindowFullScreen));
     __jsbObj->defineFunction("setWindowFullScreen", _SE(JSB_setWindowFullScreen));
     __jsbObj->defineFunction("setCursorStyle", _SE(JSB_setCursorStyle));
