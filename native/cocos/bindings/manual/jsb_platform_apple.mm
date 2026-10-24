@@ -196,9 +196,11 @@ static bool JSB_loadFont(se::State &s) {
 }
 SE_BIND_FUNC(JSB_loadFont)
 
-static void completeFileSelection(const se::Value &callback, NSString *path, NSString *error = nil) {
+static void completeFileSelection(const se::Value &callback, NSArray<NSURL *> *urls, NSString *error = nil) {
     se::AutoHandleScope scope;
-    callback.toObject()->call({path ? se::Value(path.UTF8String) : se::Value::Null,
+    se::HandleObject paths(se::Object::createArrayObject(urls.count));
+    for (uint32_t i = 0; i < urls.count; ++i) paths->setArrayElement(i, se::Value(urls[i].path.UTF8String));
+    callback.toObject()->call({se::Value(paths),
                               error ? se::Value(error.UTF8String) : se::Value::Null}, nullptr);
 }
 
@@ -277,20 +279,20 @@ static bool JSB_setCursorStyle(se::State &s) {
 }
 SE_BIND_FUNC(JSB_setCursorStyle)
 
-static bool JSB_selectFile(se::State &s) {
+static bool JSB_selectFiles(se::State &s) {
     const auto &args = s.args();
     SE_PRECONDITION2(args.size() == 2 && args[0].isString() && args[1].isObject() && args[1].toObject()->isFunction(), false, "Expected a file extension and callback");
     NSOpenPanel *panel = [NSOpenPanel openPanel];
     panel.canChooseFiles = YES;
     panel.canChooseDirectories = NO;
-    panel.allowsMultipleSelection = NO;
+    panel.allowsMultipleSelection = YES;
     panel.allowedFileTypes = @[[NSString stringWithUTF8String:args[0].toString().c_str()]];
     panel.allowsOtherFileTypes = NO;
     const bool selected = [panel runModal] == NSModalResponseOK;
-    completeFileSelection(args[1], selected ? panel.URL.path : nil);
+    completeFileSelection(args[1], selected ? panel.URLs : nil);
     return true;
 }
-SE_BIND_FUNC(JSB_selectFile)
+SE_BIND_FUNC(JSB_selectFiles)
 #endif
 
 #if CC_USE_EDITBOX
@@ -337,12 +339,7 @@ static void clearFilePicker() {
 - (void)documentPicker:(UIDocumentPickerViewController *)controller didPickDocumentsAtURLs:(NSArray<NSURL *> *)urls {
     se::Value callback = std::move(filePickerCallback);
     clearFilePicker();
-    NSURL *url = urls.firstObject;
-    if (url.isFileURL && [NSFileManager.defaultManager isReadableFileAtPath:url.path]) {
-        completeFileSelection(callback, url.path);
-    } else {
-        completeFileSelection(callback, nil, @"Could not read the selected file");
-    }
+    completeFileSelection(callback, urls);
 }
 
 - (void)documentPickerWasCancelled:(UIDocumentPickerViewController *)controller {
@@ -352,7 +349,7 @@ static void clearFilePicker() {
 }
 @end
 
-static bool JSB_selectFile(se::State &s) {
+static bool JSB_selectFiles(se::State &s) {
     const auto &args = s.args();
     SE_PRECONDITION2(args.size() == 2 && args[0].isString() && args[1].isObject() && args[1].toObject()->isFunction(), false, "Expected a file extension and callback");
     if (filePicker) {
@@ -376,12 +373,12 @@ static bool JSB_selectFile(se::State &s) {
     CFRelease(type);
     if (!filePickerDelegate) filePickerDelegate = [CCDocumentPickerDelegate new];
     filePicker.delegate = filePickerDelegate;
-    filePicker.allowsMultipleSelection = NO;
+    filePicker.allowsMultipleSelection = YES;
     filePickerCallback.setObject(args[1].toObject(), true);
     [presenter presentViewController:filePicker animated:YES completion:nil];
     return true;
 }
-SE_BIND_FUNC(JSB_selectFile)
+SE_BIND_FUNC(JSB_selectFiles)
 
 #if CC_USE_EDITBOX
 static bool JSB_hideInputBoxAccessory(se::State &s) {
@@ -411,12 +408,12 @@ bool register_platform_bindings(se::Object *obj) {
     __jsbObj->defineFunction("isWindowFullScreen", _SE(JSB_isWindowFullScreen));
     __jsbObj->defineFunction("setWindowFullScreen", _SE(JSB_setWindowFullScreen));
     __jsbObj->defineFunction("setCursorStyle", _SE(JSB_setCursorStyle));
-    __jsbObj->defineFunction("selectFile", _SE(JSB_selectFile));
+    __jsbObj->defineFunction("selectFiles", _SE(JSB_selectFiles));
 #if CC_USE_EDITBOX
     __jsbObj->setProperty("onInputBoxKey", se::Value::Null);
 #endif
 #elif CC_PLATFORM == CC_PLATFORM_IOS
-    __jsbObj->defineFunction("selectFile", _SE(JSB_selectFile));
+    __jsbObj->defineFunction("selectFiles", _SE(JSB_selectFiles));
     se::ScriptEngine::getInstance()->addBeforeCleanupHook([]() {
         [filePicker dismissViewControllerAnimated:NO completion:nil];
         clearFilePicker();

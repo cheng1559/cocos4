@@ -37,8 +37,13 @@ int SystemWindowManager::init() {
 }
 
 void SystemWindowManager::processEvent() {
+    processEvent(true);
+}
+
+void SystemWindowManager::processEvent(bool pumpEvents) {
     SDL_Event sdlEvent;
-    while (SDL_PollEvent(&sdlEvent) != 0) {
+    while ((pumpEvents ? SDL_PollEvent(&sdlEvent)
+                       : SDL_PeepEvents(&sdlEvent, 1, SDL_GETEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT)) > 0) {
         if (sdlEvent.type == SDL_QUIT) {
             WindowEvent event;
             event.type = WindowEvent::Type::CLOSE;

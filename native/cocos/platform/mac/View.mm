@@ -74,11 +74,13 @@ static int MetalViewEventWatch(void* userData, SDL_Event*event) {
         // Config metal layer
         CAMetalLayer *layer = (CAMetalLayer *)self.layer;
         layer.drawableSize = size;
+        layer.contentsScale = pixelRatio;
         layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
         layer.device = self.device = [MTLCreateSystemDefaultDevice() autorelease];
         layer.autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
         self.layerContentsRedrawPolicy = NSViewLayerContentsRedrawDuringViewResize;
-        self.layerContentsPlacement = NSViewLayerContentsPlacementScaleProportionallyToFill;
+        // Keep the previous drawable at its native size until the resized frame arrives.
+        self.layerContentsPlacement = NSViewLayerContentsPlacementTopLeft;
 
         // Add tracking area to receive mouse move events.
         NSRect rect = {0, 0, size.width, size.height};

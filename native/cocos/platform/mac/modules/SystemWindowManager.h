@@ -39,6 +39,8 @@ public:
 
     int init() override;
     void processEvent() override;
+    // Skip pumping Cocoa when called from its live-resize tracking loop.
+    void processEvent(bool pumpEvents);
 
     ISystemWindow *createWindow(const ISystemWindowInfo &info) override;
     ISystemWindow *getWindow(uint32_t windowId) const override;

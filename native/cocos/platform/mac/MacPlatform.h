@@ -53,6 +53,7 @@ public:
      * @brief Implement the main logic of the base platform.
      */
     int32_t loop() override;
+    void runTask() override;
     void setFps(int32_t fps) override;
 
     void onPause() override;
@@ -62,6 +63,7 @@ public:
 
 private:
     bool _readyToExit{false};
+    bool _runningTask{false};
     std::shared_ptr<SystemWindowManager> _windowManager{nullptr};
 };
 

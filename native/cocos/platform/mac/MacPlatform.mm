@@ -81,15 +81,52 @@ int32_t MacPlatform::loop(void) {
     }
     return 1;
 #else
+#if !defined(CC_SERVER_MODE)
+    // AppKit takes over SDL's event pump during live resize. Keep frames running
+    // in its tracking mode, draining queued SDL events without re-entering Cocoa.
+    __block NSTimer *resizeTimer = nil;
+    NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+    id resizeStart = [center addObserverForName:NSWindowWillStartLiveResizeNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        NSWindow *window = note.object;
+        if (!_windowManager->getWindowFromNSWindow(window)) return;
+        [resizeTimer invalidate];
+        NSInteger fps = 60;
+        if (@available(macOS 12.0, *)) fps = MAX(60, window.screen.maximumFramesPerSecond);
+        resizeTimer = [NSTimer timerWithTimeInterval:1.0 / fps repeats:YES block:^(NSTimer *) {
+            if (_readyToExit || _runningTask || !window.inLiveResize) return;
+            @autoreleasepool {
+                _windowManager->processEvent(false);
+                runTask();
+            }
+        }];
+        [[NSRunLoop mainRunLoop] addTimer:resizeTimer forMode:NSEventTrackingRunLoopMode];
+    }];
+    id resizeEnd = [center addObserverForName:NSWindowDidEndLiveResizeNotification object:nil queue:nil usingBlock:^(NSNotification *) {
+        [resizeTimer invalidate];
+        resizeTimer = nil;
+    }];
+#endif
     while(!_readyToExit) {
         @autoreleasepool {
             pollEvent();
             runTask();
         }
     }
+#if !defined(CC_SERVER_MODE)
+    [resizeTimer invalidate];
+    [center removeObserver:resizeStart];
+    [center removeObserver:resizeEnd];
+#endif
     onDestroy();
     return 0;
 #endif
+}
+
+void MacPlatform::runTask() {
+    if (_readyToExit || _runningTask) return;
+    _runningTask = true;
+    UniversalPlatform::runTask();
+    _runningTask = false;
 }
 
 int32_t MacPlatform::run(int argc, const char **argv) {
