@@ -59,9 +59,7 @@ int BaseGame::init() {
     if (_windowInfo.flags == -1) {
         _windowInfo.flags = cc::ISystemWindow::CC_WINDOW_SHOWN |
                             cc::ISystemWindow::CC_WINDOW_INPUT_FOCUS;
-    #if CC_PLATFORM != CC_PLATFORM_WINDOWS
         _windowInfo.flags |= cc::ISystemWindow::CC_WINDOW_RESIZABLE;
-    #endif
     }
     std::call_once(_windowCreateFlag, [&]() {
         ISystemWindowInfo info;

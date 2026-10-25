@@ -117,6 +117,20 @@ void WindowsPlatform::exit() {
     _quit = true;
 }
 
+void WindowsPlatform::runTask() {
+    if (_quit || _runningTask) return;
+    _runningTask = true;
+    UniversalPlatform::runTask();
+    _runningTask = false;
+}
+
+void WindowsPlatform::renderDuringResize() {
+    if (_quit || _runningTask) return;
+    // Drain queued events without re-entering the Windows move/size modal loop.
+    _windowManager->processEvent(false);
+    runTask();
+}
+
 int32_t WindowsPlatform::loop() {
 #if CC_EDITOR
     _windowManager->processEvent();

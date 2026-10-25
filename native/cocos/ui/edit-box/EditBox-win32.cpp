@@ -34,6 +34,7 @@
 #include <codecvt>
 #include <locale>
 #include <memory>
+#include <algorithm>
 
 #include "Richedit.h"
 
@@ -49,6 +50,9 @@ HWND g_hwndEditBox = nullptr;
 WNDPROC g_prevMainWindowProc = nullptr;
 WNDPROC g_prevEditWindowProc = nullptr;
 se::Value g_textInputCallback;
+bool g_updatingText = false;
+bool g_composing = false;
+WPARAM g_handledKey = 0;
 
 HWND getCurrentWindowHwnd() {
     if (!CC_CURRENT_APPLICATION()) {
@@ -116,6 +120,24 @@ std::wstring str2ws(const ccstd::string &text) {
     return res;
 }
 
+bool handleInputKey(WPARAM code) {
+    const char *key = nullptr;
+    switch (code) {
+        case VK_TAB: key = "Tab"; break;
+        case VK_RETURN: key = "Enter"; break;
+        case VK_ESCAPE: key = "Escape"; break;
+        case VK_UP: key = "ArrowUp"; break;
+        case VK_DOWN: key = "ArrowDown"; break;
+        default: return false;
+    }
+    se::AutoHandleScope scope;
+    se::Value callback;
+    if (!__jsbObj->getProperty("onInputBoxKey", &callback) || !callback.isObject() || !callback.toObject()->isFunction()) return false;
+    se::Value result;
+    callback.toObject()->call({se::Value(key), se::Value((GetKeyState(VK_SHIFT) & 0x8000) != 0)}, nullptr, &result);
+    return result.isBoolean() && result.toBoolean();
+}
+
 LRESULT mainWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     switch (msg) {
         case WM_LBUTTONDOWN:
@@ -124,8 +146,7 @@ LRESULT mainWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             SetFocus(getCurrentWindowHwnd());
             break;
         case WM_COMMAND:
-            // EN_CHANGE => EN_UPDATE
-            if (EN_UPDATE == HIWORD(wParam)) {
+            if (reinterpret_cast<HWND>(lParam) == g_hwndEditBox && EN_CHANGE == HIWORD(wParam) && !g_updatingText) {
                 callJSFunc("input", getText(g_hwndEditBox).c_str());
             }
             break;
@@ -137,8 +158,21 @@ LRESULT mainWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 }
 
 LRESULT editWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    const auto previous = g_prevEditWindowProc;
     switch (msg) {
+        case WM_IME_STARTCOMPOSITION: g_composing = true; break;
+        case WM_IME_ENDCOMPOSITION: g_composing = false; break;
+        case WM_KEYDOWN:
+            if (!g_composing && handleInputKey(wParam)) {
+                g_handledKey = wParam;
+                return 0;
+            }
+            break;
+        case WM_CHAR:
+            if (g_handledKey == wParam && (wParam == VK_TAB || wParam == VK_RETURN || wParam == VK_ESCAPE)) return 0;
+            break;
         case WM_KEYUP:
+            if (g_handledKey == wParam) { g_handledKey = 0; return 0; }
             if (wParam == VK_RETURN && !g_isMultiline) {
                 EditBox::complete();
                 EditBox::hide();
@@ -149,7 +183,7 @@ LRESULT editWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
     }
 
-    return CallWindowProc(g_prevEditWindowProc, hwnd, msg, wParam, lParam);
+    return IsWindow(hwnd) ? CallWindowProc(previous, hwnd, msg, wParam, lParam) : 0;
 }
 } // namespace
 
@@ -213,20 +247,29 @@ void EditBox::show(const EditBox::ShowInfo &showInfo) {
 
         g_prevMainWindowProc = (WNDPROC)SetWindowLongPtr(parent, GWLP_WNDPROC, (LONG_PTR)mainWindowProc);
         g_prevEditWindowProc = (WNDPROC)SetWindowLongPtr(g_hwndEditBox, GWLP_WNDPROC, (LONG_PTR)editWindowProc);
+        SendMessage(g_hwndEditBox, EM_SETEVENTMASK, 0, ENM_CHANGE);
     }
 
     ::SendMessageW(g_hwndEditBox, EM_LIMITTEXT, showInfo.maxLength, 0);
+
+    // Subpixel edit boxes only bridge keyboard input; their text and caret are drawn by the game.
+    const bool inputOnly = showInfo.width < 1 || showInfo.height < 1;
+    const auto extendedStyle = GetWindowLongPtr(g_hwndEditBox, GWL_EXSTYLE);
+    SetWindowLongPtr(g_hwndEditBox, GWL_EXSTYLE, inputOnly ? extendedStyle | WS_EX_LAYERED : extendedStyle & ~WS_EX_LAYERED);
+    if (inputOnly) SetLayeredWindowAttributes(g_hwndEditBox, 0, 0, LWA_ALPHA);
 
     // SendMessage(g_hwndEditBox, EM_SETCHARFORMAT, SCF_ALL, (LPARAM)&cf);
     SetWindowPos(g_hwndEditBox,
                  HWND_NOTOPMOST,
                  showInfo.x,
                  windowHeight - showInfo.y - showInfo.height,
-                 showInfo.width,
-                 showInfo.height,
+                 std::max(1, showInfo.width),
+                 std::max(1, showInfo.height),
                  SWP_NOZORDER);
 
+    g_updatingText = true;
     ::SetWindowTextW(g_hwndEditBox, str2ws(showInfo.defaultValue).c_str());
+    g_updatingText = false;
 
     // SendMessage(g_hwndEditBox, EM_SETFONTSIZE, 1, 0);
     SendMessage(g_hwndEditBox, EM_SETBKGNDCOLOR, 0, RGB((showInfo.backgroundColor & 0x000000ff), (showInfo.backgroundColor & 0x0000ff00) >> 8, (showInfo.backgroundColor & 0x00ff0000) >> 16));
@@ -239,7 +282,7 @@ void EditBox::show(const EditBox::ShowInfo &showInfo) {
 
     SendMessage(g_hwndEditBox, EM_SETSEL, (WPARAM)0, (LPARAM)index);
     // int height = CC_GET_MAIN_SYSTEM_WINDOW()->kheight;
-    CHARFORMAT2 cf;
+    CHARFORMAT2 cf{};
     RECT rect;
 
     GetWindowRect(getCurrentWindowHwnd(), &rect);
@@ -268,11 +311,35 @@ void EditBox::show(const EditBox::ShowInfo &showInfo) {
 }
 
 void EditBox::hide() {
-    DestroyWindow(g_hwndEditBox);
-
-    SetWindowLongPtr(getCurrentWindowHwnd(), GWLP_WNDPROC, (LONG_PTR)g_prevMainWindowProc);
-    SetWindowLongPtr(g_hwndEditBox, GWLP_WNDPROC, (LONG_PTR)g_prevEditWindowProc);
+    if (!g_hwndEditBox) return;
+    const auto edit = g_hwndEditBox;
     g_hwndEditBox = nullptr;
+    SetWindowLongPtr(getCurrentWindowHwnd(), GWLP_WNDPROC, (LONG_PTR)g_prevMainWindowProc);
+    SetWindowLongPtr(edit, GWLP_WNDPROC, (LONG_PTR)g_prevEditWindowProc);
+    DestroyWindow(edit);
+    g_composing = false;
+    g_handledKey = 0;
+    SetFocus(getCurrentWindowHwnd());
+}
+
+void EditBox::setText(const ccstd::string &text, int start, int end) {
+    if (!g_hwndEditBox) return;
+    if (getText(g_hwndEditBox) != text) {
+        g_updatingText = true;
+        SetWindowTextW(g_hwndEditBox, str2ws(text).c_str());
+        g_updatingText = false;
+    }
+    const int length = GetWindowTextLengthW(g_hwndEditBox);
+    SendMessage(g_hwndEditBox, EM_SETSEL, std::clamp(start, 0, length), std::clamp(end, 0, length));
+}
+
+bool EditBox::getSelection(int &start, int &end) {
+    if (!g_hwndEditBox) return false;
+    DWORD from = 0, to = 0;
+    SendMessage(g_hwndEditBox, EM_GETSEL, reinterpret_cast<WPARAM>(&from), reinterpret_cast<LPARAM>(&to));
+    start = static_cast<int>(from);
+    end = static_cast<int>(to);
+    return true;
 }
 
 bool EditBox::complete() {

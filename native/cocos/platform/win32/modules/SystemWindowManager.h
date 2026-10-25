@@ -39,6 +39,7 @@ public:
 
     int init() override;
     void processEvent() override;
+    void processEvent(bool pumpEvents);
 
     ISystemWindow *createWindow(const ISystemWindowInfo &info) override;
     ISystemWindow *getWindow(uint32_t windowId) const override;

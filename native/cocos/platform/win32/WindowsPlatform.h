@@ -44,6 +44,8 @@ public:
     int32_t init() override;
 
     int32_t loop() override;
+    void runTask() override;
+    void renderDuringResize();
 
     void exit() override;
 
@@ -53,6 +55,7 @@ private:
     std::shared_ptr<SystemWindowManager> _windowManager{nullptr};
     std::shared_ptr<SystemWindow> _window{nullptr};
     bool _quit{false};
+    bool _runningTask{false};
 };
 
 } // namespace cc

@@ -3578,7 +3578,7 @@ if(NX)
     include(${CMAKE_CURRENT_LIST_DIR}/platform-nx/setup.cmake)
 elseif(WINDOWS)
     target_link_libraries(${ENGINE_NAME} PUBLIC
-        ws2_32 userenv psapi winmm Iphlpapi
+        ws2_32 userenv psapi winmm Iphlpapi ole32
         ${CC_EXTERNAL_LIBS}
     )
     cc_win32_definations(${ENGINE_NAME})
@@ -3595,7 +3595,7 @@ elseif(WINDOWS)
             ws2_32 psapi userenv Iphlpapi
         )
         target_link_libraries(ccbindings PUBLIC
-            ws2_32
+            ws2_32 ole32
         )
     endif()
 endif()

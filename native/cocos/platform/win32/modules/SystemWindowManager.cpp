@@ -36,8 +36,13 @@ int SystemWindowManager::init() {
 }
 
 void SystemWindowManager::processEvent() {
+    processEvent(true);
+}
+
+void SystemWindowManager::processEvent(bool pumpEvents) {
     SDL_Event sdlEvent;
-    while (SDL_PollEvent(&sdlEvent) != 0) {
+    while ((pumpEvents ? SDL_PollEvent(&sdlEvent)
+                       : SDL_PeepEvents(&sdlEvent, 1, SDL_GETEVENT, SDL_FIRSTEVENT, SDL_LASTEVENT)) > 0) {
         SDL_Window *sdlWindow = SDL_GetWindowFromID(sdlEvent.window.windowID);
         // SDL_Event like SDL_QUIT does not associate a window
         if (!sdlWindow) {

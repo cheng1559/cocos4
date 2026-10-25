@@ -62,7 +62,7 @@ public:
     static void show(const ShowInfo &showInfo);
     static void hide();
 
-#if CC_PLATFORM == CC_PLATFORM_MACOS || CC_PLATFORM == CC_PLATFORM_IOS
+#if CC_PLATFORM == CC_PLATFORM_MACOS || CC_PLATFORM == CC_PLATFORM_IOS || CC_PLATFORM == CC_PLATFORM_WINDOWS
     static void setText(const ccstd::string &text, int start, int end);
     static bool getSelection(int &start, int &end);
 #endif
