@@ -77,6 +77,7 @@ protected:
 
     //play by circular buffer
     float _currTime;
+    float _deviceResumeOffset{0.F};
     bool _streamingSource;
     ALuint _bufferIds[3];
     std::thread *_rotateBufferThread;

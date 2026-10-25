@@ -125,6 +125,9 @@ using namespace cc; //NOLINT
 
 static ALCdevice *sALDevice = nullptr;
 static ALCcontext *sALContext = nullptr;
+#if CC_PLATFORM == CC_PLATFORM_WINDOWS
+static LPALCRESETDEVICESOFT sResetDevice = nullptr;
+#endif
 
 AudioEngineImpl::AudioEngineImpl()
 : _lazyInitLoop(true),
@@ -132,6 +135,9 @@ AudioEngineImpl::AudioEngineImpl()
 }
 
 AudioEngineImpl::~AudioEngineImpl() {
+#if CC_PLATFORM == CC_PLATFORM_WINDOWS
+    sResetDevice = nullptr;
+#endif
     if (auto sche = _scheduler.lock()) {
         sche->unschedule("AudioEngine", this);
     }
@@ -178,6 +184,11 @@ bool AudioEngineImpl::init() {
         }
 
         alcMakeContextCurrent(sALContext);
+#if CC_PLATFORM == CC_PLATFORM_WINDOWS
+        if (alcIsExtensionPresent(sALDevice, "ALC_EXT_disconnect")) {
+            sResetDevice = reinterpret_cast<LPALCRESETDEVICESOFT>(alcGetProcAddress(sALDevice, "alcResetDeviceSOFT"));
+        }
+#endif
 
         std::fill(std::begin(_alSources), std::end(_alSources), 0);
 
@@ -516,7 +527,42 @@ void AudioEngineImpl::setFinishCallback(int audioID, const std::function<void(in
     _audioPlayers[audioID]->_finishCallbak = callback;
 }
 
-void AudioEngineImpl::update(float /*dt*/) {
+bool AudioEngineImpl::recoverDevice(float dt) {
+#if CC_PLATFORM == CC_PLATFORM_WINDOWS
+    if (!sALDevice || !sResetDevice) return true;
+    ALCint connected = ALC_TRUE;
+    alcGetIntegerv(sALDevice, ALC_CONNECTED, 1, &connected);
+    if (connected == ALC_TRUE) {
+        _deviceResetDelay = 0.F;
+        return true;
+    }
+    _deviceResetDelay -= dt;
+    if (_deviceResetDelay > 0.F) return false;
+    _deviceResetDelay = 1.F;
+    if (sResetDevice(sALDevice, nullptr) != ALC_TRUE) {
+        alcGetError(sALDevice);
+        return false;
+    }
+    _deviceResetDelay = 0.F;
+    // Reset keeps sources/buffers, but disconnect stops them; restore playback without replacing audio IDs.
+    for (const auto &entry : _audioPlayers) {
+        auto *player = entry.second;
+        if (!player->_ready || player->_removeByAudioEngine) continue;
+        const auto state = AudioEngine::getState(entry.first);
+        if (state != AudioEngine::AudioState::PLAYING && state != AudioEngine::AudioState::PAUSED) continue;
+        alSourcef(player->_alSource, AL_SEC_OFFSET, player->_deviceResumeOffset);
+        alSourcePlay(player->_alSource);
+        if (state == AudioEngine::AudioState::PAUSED) alSourcePause(player->_alSource);
+    }
+    CC_LOG_INFO("OpenAL audio output reconnected");
+#else
+    CC_UNUSED_PARAM(dt);
+#endif
+    return true;
+}
+
+void AudioEngineImpl::update(float dt) {
+    const bool deviceConnected = recoverDevice(dt);
     ccstd::vector<std::function<void()>> finishCallbacks;
     ALint sourceState;
     int audioID;
@@ -538,7 +584,7 @@ void AudioEngineImpl::update(float /*dt*/) {
             _threadMutex.unlock();
             delete player;
             _alSourceUsed[alSource] = false;
-        } else if (player->_ready && sourceState == AL_STOPPED) {
+        } else if (deviceConnected && player->_ready && sourceState == AL_STOPPED) {
             ccstd::string filePath;
             if (player->_finishCallbak) {
                 auto &audioInfo = AudioEngine::sAudioIDInfoMap[audioID];
@@ -559,11 +605,16 @@ void AudioEngineImpl::update(float /*dt*/) {
             delete player;
             _alSourceUsed[alSource] = false;
         } else {
+#if CC_PLATFORM == CC_PLATFORM_WINDOWS
+            if (deviceConnected && player->_ready && (sourceState == AL_PLAYING || sourceState == AL_PAUSED)) {
+                alGetSourcef(alSource, AL_SEC_OFFSET, &player->_deviceResumeOffset);
+            }
+#endif
             ++it;
         }
     }
 
-    if (_audioPlayers.empty()) {
+    if (_audioPlayers.empty() && deviceConnected) {
         _lazyInitLoop = true;
         if (auto sche = _scheduler.lock()) {
             sche->unschedule("AudioEngine", this);

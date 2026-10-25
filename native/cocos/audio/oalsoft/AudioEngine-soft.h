@@ -70,6 +70,7 @@ public:
     ccstd::vector<uint8_t> getOriginalPCMBuffer(const char *url, uint32_t channelID);
 
 private:
+    bool recoverDevice(float dt);
     bool checkAudioIdValid(int audioID);
     void play2dImpl(AudioCache *cache, int audioID);
 
@@ -86,6 +87,7 @@ private:
     std::mutex _threadMutex;
 
     bool _lazyInitLoop;
+    float _deviceResetDelay{0.F};
 
     int _currentAudioID;
     std::weak_ptr<Scheduler> _scheduler;

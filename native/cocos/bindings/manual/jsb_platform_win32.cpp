@@ -54,6 +54,7 @@ static double maximumWindowAspect{0};
 static constexpr UINT_PTR RESIZE_TIMER_ID = 0xCC51;
 static bool resizingWindow{false};
 static RECT resizeStartClient{};
+static SIZE resizeTargetSize{};
 
 const ccstd::unordered_map<ccstd::string, ccstd::string> &getFontFamilyNameMap() {
     return fontFamilyNameMap;
@@ -112,7 +113,10 @@ static void constrainWindowRect(HWND window, RECT &rect, bool vertical, UINT edg
     const LONG borderHeight = frame.bottom - frame.top - client.bottom;
     const double width = rect.right - rect.left - borderWidth, height = rect.bottom - rect.top - borderHeight;
     if (width <= 0 || height <= 0) return;
-    if (edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT || edge == WMSZ_BOTTOMLEFT || edge == WMSZ_BOTTOMRIGHT) {
+    if (edge == WMSZ_TOP || edge == WMSZ_BOTTOM) {
+        // Vertical drags may grow the width, but shortening the height must not shrink it.
+        vertical = width > height * maximumWindowAspect;
+    } else if (edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT || edge == WMSZ_BOTTOMLEFT || edge == WMSZ_BOTTOMRIGHT) {
         // Use a stable baseline so constraining one axis cannot flip the next event's drag direction.
         const auto &start = resizingWindow ? resizeStartClient : client;
         vertical = std::abs(width - start.right) > std::abs(height - start.bottom);
@@ -132,9 +136,42 @@ static void constrainWindowRect(HWND window, RECT &rect, bool vertical, UINT edg
     }
 }
 
+static void constrainWindowPosition(HWND window, WINDOWPOS &position) {
+    MONITORINFO monitor{sizeof(MONITORINFO)};
+    const bool hasWorkArea = GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor) != FALSE;
+    RECT frame{}, client{};
+    GetWindowRect(window, &frame);
+    GetClientRect(window, &client);
+    RECT rect{0, 0, position.cx, position.cy};
+    const bool verticalStretch = hasWorkArea && position.cy >= monitor.rcWork.bottom - monitor.rcWork.top &&
+        position.cx < monitor.rcWork.right - monitor.rcWork.left;
+    if (hasWorkArea) {
+        rect.right = std::min(rect.right, monitor.rcWork.right - monitor.rcWork.left);
+        rect.bottom = std::min(rect.bottom, monitor.rcWork.bottom - monitor.rcWork.top);
+    }
+    const LONG width = rect.right - (frame.right - frame.left - client.right);
+    const LONG height = rect.bottom - (frame.bottom - frame.top - client.bottom);
+    constrainWindowRect(window, rect, verticalStretch ? width > height * maximumWindowAspect : width < height * minimumWindowAspect);
+    if (hasWorkArea && rect.right > monitor.rcWork.right - monitor.rcWork.left) {
+        rect.right = monitor.rcWork.right - monitor.rcWork.left;
+        constrainWindowRect(window, rect, true);
+    }
+    if (!(position.flags & SWP_NOMOVE)) {
+        position.x += (position.cx - rect.right) / 2;
+        position.y += (position.cy - rect.bottom) / 2;
+        if (hasWorkArea) {
+            position.x = std::clamp<LONG>(position.x, monitor.rcWork.left, monitor.rcWork.right - rect.right);
+            position.y = std::clamp<LONG>(position.y, monitor.rcWork.top, monitor.rcWork.bottom - rect.bottom);
+        }
+    }
+    position.cx = rect.right;
+    position.cy = rect.bottom;
+}
+
 static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     if (message == WM_ENTERSIZEMOVE) {
         GetClientRect(window, &resizeStartClient);
+        resizeTargetSize = {};
         resizingWindow = true;
         SetTimer(window, RESIZE_TIMER_ID, 16, nullptr);
     } else if (message == WM_EXITSIZEMOVE) {
@@ -148,30 +185,36 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
     auto *sdlWindow = getMainWindow();
     if (sdlWindow && !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN) && !IsIconic(window)) {
         if (message == WM_SIZING) {
-            constrainWindowRect(window, *reinterpret_cast<RECT *>(lParam), wParam == WMSZ_TOP || wParam == WMSZ_BOTTOM,
-                                static_cast<UINT>(wParam));
+            auto &rect = *reinterpret_cast<RECT *>(lParam);
+            constrainWindowRect(window, rect, false, static_cast<UINT>(wParam));
+            resizeTargetSize = {rect.right - rect.left, rect.bottom - rect.top};
             return TRUE;
         }
-        if (message == WM_WINDOWPOSCHANGING && !resizingWindow) {
+        if (message == WM_WINDOWPOSCHANGING) {
             auto &position = *reinterpret_cast<WINDOWPOS *>(lParam);
-            if (!(position.flags & SWP_NOSIZE)) {
-                RECT frame{}, client{};
-                GetWindowRect(window, &frame);
-                GetClientRect(window, &client);
-                const LONG width = position.cx - (frame.right - frame.left - client.right);
-                const LONG height = position.cy - (frame.bottom - frame.top - client.bottom);
-                RECT rect{0, 0, position.cx, position.cy};
-                constrainWindowRect(window, rect, width < height * minimumWindowAspect);
-                if (!(position.flags & SWP_NOMOVE)) {
-                    position.x += (position.cx - rect.right) / 2;
-                    position.y += (position.cy - rect.bottom) / 2;
-                }
-                position.cx = rect.right;
-                position.cy = rect.bottom;
+            // Skip only the WM_SIZING result; Windows Snap can submit a different size during the same drag.
+            const bool alreadyConstrained = resizingWindow && position.cx == resizeTargetSize.cx && position.cy == resizeTargetSize.cy;
+            if (!(position.flags & SWP_NOSIZE) && !alreadyConstrained) {
+                constrainWindowPosition(window, position);
             }
         }
     }
     const auto result = CallWindowProcW(previousWindowProc, window, message, wParam, lParam);
+    if (message == WM_GETMINMAXINFO && sdlWindow && !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN)) {
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        if (GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) {
+            WINDOWPOS position{};
+            position.x = monitor.rcWork.left;
+            position.y = monitor.rcWork.top;
+            position.cx = monitor.rcWork.right - monitor.rcWork.left;
+            position.cy = monitor.rcWork.bottom - monitor.rcWork.top;
+            constrainWindowPosition(window, position);
+            auto &limits = *reinterpret_cast<MINMAXINFO *>(lParam);
+            limits.ptMaxSize = {position.cx, position.cy};
+            limits.ptMaxPosition = {position.x - monitor.rcMonitor.left, position.y - monitor.rcMonitor.top};
+            return 0;
+        }
+    }
     // SDL must queue the new size before rendering; WM_TIMER alone can leave a stale frame during live resize.
     if (resizingWindow && (message == WM_SIZE || message == WM_PAINT)) {
         static_cast<WindowsPlatform *>(BasePlatform::getPlatform())->renderDuringResize();
