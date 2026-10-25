@@ -64,6 +64,12 @@ Object.defineProperty (assetProto, '_nativeAsset', {
     }
 });
 
+Object.defineProperty(assetProto, 'nativeAsset', {
+    get (): any {
+        return this._file;
+    },
+});
+
 Object.defineProperty (assetProto, 'nativeUrl', {
     get (): string {
         if (!this._nativeUrl) {

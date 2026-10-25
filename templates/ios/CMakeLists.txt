@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.24)
 
 set(CMAKE_SYSTEM_NAME iOS)
 set(APP_NAME "CocosGame"  CACHE STRING "Project Name")
