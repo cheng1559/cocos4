@@ -138,21 +138,25 @@ int getTextInputHeight(bool isMultiLine) {
         return TEXT_LINE_HEIGHT;
 }
 
-void setTextFieldKeyboardType(UITextField *textField, const ccstd::string &inputType) {
-    if (0 == inputType.compare("password")) {
-        textField.secureTextEntry = TRUE;
-        textField.keyboardType = UIKeyboardTypeDefault;
-    } else {
-        textField.secureTextEntry = FALSE;
-        if (0 == inputType.compare("email"))
-            textField.keyboardType = UIKeyboardTypeEmailAddress;
-        else if (0 == inputType.compare("number"))
-            textField.keyboardType = UIKeyboardTypeDecimalPad;
-        else if (0 == inputType.compare("url"))
-            textField.keyboardType = UIKeyboardTypeURL;
-        else if (0 == inputType.compare("text"))
-            textField.keyboardType = UIKeyboardTypeDefault;
+void configureTextInputTraits(id<UITextInputTraits> input, const cc::EditBox::ShowInfo *showInfo) {
+    const bool autocorrect = showInfo->autocorrect;
+    input.autocapitalizationType = autocorrect ? UITextAutocapitalizationTypeSentences : UITextAutocapitalizationTypeNone;
+    input.autocorrectionType = autocorrect ? UITextAutocorrectionTypeDefault : UITextAutocorrectionTypeNo;
+    input.spellCheckingType = autocorrect ? UITextSpellCheckingTypeDefault : UITextSpellCheckingTypeNo;
+    if (@available(iOS 11.0, *)) {
+        input.smartQuotesType = autocorrect ? UITextSmartQuotesTypeDefault : UITextSmartQuotesTypeNo;
+        input.smartDashesType = autocorrect ? UITextSmartDashesTypeDefault : UITextSmartDashesTypeNo;
+        input.smartInsertDeleteType = autocorrect ? UITextSmartInsertDeleteTypeDefault : UITextSmartInsertDeleteTypeNo;
     }
+    if (@available(iOS 17.0, *)) {
+        input.inlinePredictionType = autocorrect ? UITextInlinePredictionTypeDefault : UITextInlinePredictionTypeNo;
+    }
+    const auto &type = showInfo->inputType;
+    input.secureTextEntry = type == "password";
+    input.keyboardType = type == "ascii" ? UIKeyboardTypeASCIICapable
+        : type == "email" ? UIKeyboardTypeEmailAddress
+        : type == "number" ? UIKeyboardTypeDecimalPad
+        : type == "url" ? UIKeyboardTypeURL : UIKeyboardTypeDefault;
 }
 
 void setTextFieldReturnType(UITextField *textField, const ccstd::string &returnType) {
@@ -523,6 +527,8 @@ static EditboxManager *instance = nil;
     }
     ((UITextView*)[ret inputOnToolbar]).text = [NSString stringWithUTF8String:showInfo->defaultValue.c_str()];
     ((UITextView*)[ret inputOnView]).text = [NSString stringWithUTF8String:showInfo->defaultValue.c_str()];
+    configureTextInputTraits([ret inputOnToolbar], showInfo);
+    configureTextInputTraits([ret inputOnView], showInfo);
     return ret;
 }
 - (id) createTextField:    (const cc::EditBox::ShowInfo*)showInfo {
@@ -557,8 +563,8 @@ static EditboxManager *instance = nil;
     ((UITextField*)[ret inputOnView]).text = [NSString stringWithUTF8String:showInfo->defaultValue.c_str()];
     setTextFieldReturnType((UITextField*)[ret inputOnToolbar], showInfo->confirmType);
     setTextFieldReturnType((UITextField*)[ret inputOnView], showInfo->confirmType);
-    setTextFieldKeyboardType((UITextField*)[ret inputOnToolbar], showInfo->inputType);
-    setTextFieldKeyboardType((UITextField*)[ret inputOnView], showInfo->inputType);
+    configureTextInputTraits([ret inputOnToolbar], showInfo);
+    configureTextInputTraits([ret inputOnView], showInfo);
     return ret;
 }
 

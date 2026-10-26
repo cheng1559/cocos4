@@ -859,6 +859,11 @@ static bool JSB_showInputBox(se::State &s) { // NOLINT
         SE_PRECONDITION2(ok && tmp.isBoolean(), false, "multiple is invalid!");
         showInfo.isMultiline = tmp.toBoolean();
 
+        if (obj->getProperty("autocorrect", &tmp) && !tmp.isUndefined()) {
+            SE_PRECONDITION2(tmp.isBoolean(), false, "autocorrect is invalid!");
+            showInfo.autocorrect = tmp.toBoolean();
+        }
+
         if (obj->getProperty("confirmHold", &tmp)) {
             SE_PRECONDITION2(tmp.isBoolean(), false, "confirmHold is invalid!");
             if (!tmp.isUndefined()) {

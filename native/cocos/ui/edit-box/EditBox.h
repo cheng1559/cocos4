@@ -47,6 +47,7 @@ public:
         int height = 0;
         bool confirmHold = false;
         bool isMultiline = false;
+        bool autocorrect = true;
         //NEW PROPERTIES
         uint32_t fontSize = 20;
         uint32_t fontColor = 0x00000000;
