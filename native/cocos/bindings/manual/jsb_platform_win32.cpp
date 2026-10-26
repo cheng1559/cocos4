@@ -35,6 +35,7 @@
 
 #include <SDL2/SDL.h>
 #include <Windows.h>
+#include <dwmapi.h>
 #include <shobjidl.h>
 #include <wrl/client.h>
 #include "cocos/platform/SDLHelper.h"
@@ -136,18 +137,42 @@ static void constrainWindowRect(HWND window, RECT &rect, bool vertical, UINT edg
     }
 }
 
-static void constrainWindowPosition(HWND window, WINDOWPOS &position) {
+static void constrainWindowPosition(HWND window, WINDOWPOS &position, bool maximized = false) {
+    maximized = maximized || IsZoomed(window);
     MONITORINFO monitor{sizeof(MONITORINFO)};
     const bool hasWorkArea = GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor) != FALSE;
     RECT frame{}, client{};
     GetWindowRect(window, &frame);
     GetClientRect(window, &client);
-    RECT rect{0, 0, position.cx, position.cy};
-    const bool verticalStretch = hasWorkArea && position.cy >= monitor.rcWork.bottom - monitor.rcWork.top &&
+    const bool verticalStretch = !maximized && hasWorkArea && position.cy >= monitor.rcWork.bottom - monitor.rcWork.top &&
         position.cx < monitor.rcWork.right - monitor.rcWork.left;
     if (hasWorkArea) {
-        rect.right = std::min(rect.right, monitor.rcWork.right - monitor.rcWork.left);
-        rect.bottom = std::min(rect.bottom, monitor.rcWork.bottom - monitor.rcWork.top);
+        RECT invisible{};
+        if (maximized) {
+            WINDOWINFO info{sizeof(WINDOWINFO)};
+            if (GetWindowInfo(window, &info)) {
+                invisible.left = invisible.right = static_cast<LONG>(info.cxWindowBorders);
+                invisible.top = invisible.bottom = static_cast<LONG>(info.cyWindowBorders);
+            }
+        } else {
+            RECT visible{};
+            if (SUCCEEDED(DwmGetWindowAttribute(window, DWMWA_EXTENDED_FRAME_BOUNDS, &visible, sizeof(visible)))) {
+                invisible = {std::max<LONG>(0, visible.left - frame.left), std::max<LONG>(0, visible.top - frame.top),
+                             std::max<LONG>(0, frame.right - visible.right), std::max<LONG>(0, frame.bottom - visible.bottom)};
+            }
+        }
+        // The work area bounds the visible frame, not the invisible resize border returned by GetWindowRect.
+        monitor.rcWork.left -= invisible.left;
+        monitor.rcWork.top -= invisible.top;
+        monitor.rcWork.right += invisible.right;
+        monitor.rcWork.bottom += invisible.bottom;
+    }
+    RECT rect{0, 0, position.cx, position.cy};
+    if (hasWorkArea) {
+        rect.right = maximized ? monitor.rcWork.right - monitor.rcWork.left
+                               : std::min(rect.right, monitor.rcWork.right - monitor.rcWork.left);
+        rect.bottom = maximized ? monitor.rcWork.bottom - monitor.rcWork.top
+                                : std::min(rect.bottom, monitor.rcWork.bottom - monitor.rcWork.top);
     }
     const LONG width = rect.right - (frame.right - frame.left - client.right);
     const LONG height = rect.bottom - (frame.bottom - frame.top - client.bottom);
@@ -208,7 +233,7 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
             position.y = monitor.rcWork.top;
             position.cx = monitor.rcWork.right - monitor.rcWork.left;
             position.cy = monitor.rcWork.bottom - monitor.rcWork.top;
-            constrainWindowPosition(window, position);
+            constrainWindowPosition(window, position, true);
             auto &limits = *reinterpret_cast<MINMAXINFO *>(lParam);
             limits.ptMaxSize = {position.cx, position.cy};
             limits.ptMaxPosition = {position.x - monitor.rcMonitor.left, position.y - monitor.rcMonitor.top};
