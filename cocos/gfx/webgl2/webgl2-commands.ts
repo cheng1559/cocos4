@@ -3239,6 +3239,10 @@ export function WebGL2CmdFuncBlitTexture (
     const dstFramebuffer = blitManager.dstFramebuffer;
     const origReadFBO = cache.glReadFramebuffer;
     const origDrawFBO = cache.glFramebuffer;
+    // Texture copies are independent of the active camera's scissor. In particular,
+    // an offscreen UI preview must not clip a newly uploaded atlas page.
+    const origScissor = cache.scissorRect;
+    gl.scissor(0, 0, dst.width, dst.height);
 
     let srcMip = regions[0].srcSubres.mipLevel;
     let dstMip = regions[0].dstSubres.mipLevel;
@@ -3338,4 +3342,5 @@ export function WebGL2CmdFuncBlitTexture (
         gl.bindFramebuffer(WebGLConstants.DRAW_FRAMEBUFFER, origDrawFBO);
         cache.glFramebuffer = origDrawFBO;
     }
+    gl.scissor(origScissor.x, origScissor.y, origScissor.width, origScissor.height);
 }

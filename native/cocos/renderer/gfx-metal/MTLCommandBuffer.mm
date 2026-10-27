@@ -968,6 +968,33 @@ void CCMTLCommandBuffer::blitTexture(Texture *srcTexture, Texture *dstTexture, c
             dst = ccDstTex->getMTLTexture();
         }
 
+        // Equal-size regions are copies, even when the complete textures differ in size.
+        // Atlas uploads must retain their texel coordinates instead of scaling to the page.
+        bool directCopy = src.pixelFormat == dst.pixelFormat && src.textureType == MTLTextureType2D && dst.textureType == MTLTextureType2D;
+        for (uint32_t i = 0; i < count && directCopy; ++i) {
+            directCopy = regions[i].srcExtent.width == regions[i].dstExtent.width &&
+                         regions[i].srcExtent.height == regions[i].dstExtent.height &&
+                         regions[i].srcExtent.depth == regions[i].dstExtent.depth &&
+                         regions[i].srcSubres.layerCount == 1 && regions[i].dstSubres.layerCount == 1;
+        }
+        if (directCopy) {
+            id<MTLBlitCommandEncoder> encoder = [cmdBuffer blitCommandEncoder];
+            for (uint32_t i = 0; i < count; ++i) {
+                const auto &region = regions[i];
+                [encoder copyFromTexture:src
+                             sourceSlice:region.srcSubres.baseArrayLayer
+                             sourceLevel:region.srcSubres.mipLevel
+                            sourceOrigin:MTLOriginMake(region.srcOffset.x, region.srcOffset.y, region.srcOffset.z)
+                              sourceSize:MTLSizeMake(region.srcExtent.width, region.srcExtent.height, region.srcExtent.depth)
+                               toTexture:dst
+                        destinationSlice:region.dstSubres.baseArrayLayer
+                        destinationLevel:region.dstSubres.mipLevel
+                       destinationOrigin:MTLOriginMake(region.dstOffset.x, region.dstOffset.y, region.dstOffset.z)];
+            }
+            [encoder endEncoding];
+            return;
+        }
+
         id<MTLDevice> mtlDevice = static_cast<id<MTLDevice>>(_mtlDevice->getMTLDevice());
 
         //format conversion
