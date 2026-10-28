@@ -201,6 +201,14 @@ void callJSFunc(const ccstd::string &type, const ccstd::string &text) {
     g_textInputCallback.toObject()->call(args, nullptr);
 }
 
+// Subpixel edit boxes only bridge keyboard input; their text and caret are drawn by the game.
+// Transparent instead of hidden, so the field stays first responder; this also hides its focus ring.
+void setInputOnly(NSView *view, const cc::EditBox::ShowInfo &showInfo) {
+    const bool inputOnly = showInfo.width < 1 || showInfo.height < 1;
+    view.alphaValue = inputOnly ? 0 : 1;
+    view.focusRingType = inputOnly ? NSFocusRingTypeNone : NSFocusRingTypeDefault;
+}
+
 void initTextView(const cc::EditBox::ShowInfo &showInfo) {
     CGRect rect = CGRectMake(showInfo.x, showInfo.y, showInfo.width, showInfo.height);
     if (!g_textView) {
@@ -220,6 +228,7 @@ void initTextView(const cc::EditBox::ShowInfo &showInfo) {
     g_textView.string = [NSString stringWithUTF8String:showInfo.defaultValue.c_str()];
     g_textView.frame = rect;
     g_scrollView.frame = rect;
+    setInputOnly(g_scrollView, showInfo);
 
     NSWindow *nsWindow = NSApplication.sharedApplication.mainWindow;
     [nsWindow.contentView addSubview:g_scrollView];
@@ -230,6 +239,7 @@ void doInitTextField(NSTextField *textField, const CGRect &rect, const cc::EditB
     textField.editable = TRUE;
     textField.wantsLayer = TRUE;
     textField.frame = rect;
+    setInputOnly(textField, showInfo);
     textField.stringValue = [NSString stringWithUTF8String:showInfo.defaultValue.c_str()];
     [(TextFieldFormatter *)textField.formatter setMaximumLength:showInfo.maxLength];
 

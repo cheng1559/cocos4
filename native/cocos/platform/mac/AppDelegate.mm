@@ -45,11 +45,12 @@
 {
     if (!_platform) _platform = static_cast<cc::MacPlatform*>(cc::BasePlatform::getPlatform());
     if (_platform->readyToExit()) return NSTerminateNow;
-    // Defer shutdown to the SDL loop so engine cleanup runs outside AppKit callbacks.
+    // Defer shutdown to the SDL loop so engine cleanup runs outside AppKit callbacks. Cancel, as SDL does:
+    // NSTerminateLater would block that loop inside this callback until a reply that it never gets to send.
     SDL_Event event{};
     event.type = SDL_QUIT;
     SDL_PushEvent(&event);
-    return NSTerminateLater;
+    return NSTerminateCancel;
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)theApplication {
