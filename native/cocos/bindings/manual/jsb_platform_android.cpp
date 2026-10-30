@@ -82,7 +82,51 @@ static bool jsbLoadFont(se::State &s) {
 }
 SE_BIND_FUNC(jsbLoadFont)
 
+#ifndef JCLS_FILEPICKER
+    #define JCLS_FILEPICKER "com/cocos/lib/CocosFilePicker"
+#endif
+
+static se::Value gFilePickerCallback;
+
+static void completeFileSelection(const se::Value &callback, const ccstd::vector<ccstd::string> &paths, const char *error) {
+    se::AutoHandleScope scope;
+    se::HandleObject array(se::Object::createArrayObject(paths.size()));
+    for (uint32_t i = 0; i < paths.size(); ++i) array->setArrayElement(i, se::Value(paths[i]));
+    callback.toObject()->call({se::Value(array), error ? se::Value(error) : se::Value::Null}, nullptr);
+}
+
+static bool jsbSelectFiles(se::State &s) {
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 2 && args[0].isString() && args[1].isObject() && args[1].toObject()->isFunction(), false, "Expected a file extension and callback");
+    if (!gFilePickerCallback.isUndefined()) {
+        completeFileSelection(args[1], {}, "A file selection is already open");
+        return true;
+    }
+    gFilePickerCallback.setObject(args[1].toObject(), true);
+    cc::JniHelper::callStaticVoidMethod(JCLS_FILEPICKER, "select", args[0].toString());
+    return true;
+}
+SE_BIND_FUNC(jsbSelectFiles)
+
+// Called by CocosFilePicker on the game thread.
+extern "C" JNIEXPORT void JNICALL Java_com_cocos_lib_CocosFilePicker_onFilesSelectedNative(JNIEnv *env, jclass /*unused*/, jobjectArray paths, jstring error) { // NOLINT
+    if (gFilePickerCallback.isUndefined()) return;
+    se::Value callback = std::move(gFilePickerCallback);
+    gFilePickerCallback.setUndefined();
+    ccstd::vector<ccstd::string> result;
+    const jsize count = env->GetArrayLength(paths);
+    for (jsize i = 0; i < count; ++i) {
+        auto *path = static_cast<jstring>(env->GetObjectArrayElement(paths, i));
+        result.push_back(cc::JniHelper::jstring2string(path));
+        env->DeleteLocalRef(path);
+    }
+    const ccstd::string message = error ? cc::JniHelper::jstring2string(error) : "";
+    completeFileSelection(callback, result, error ? message.c_str() : nullptr);
+}
+
 bool register_platform_bindings(se::Object * /*obj*/) { // NOLINT(readability-identifier-naming)
     __jsbObj->defineFunction("loadFont", _SE(jsbLoadFont));
+    __jsbObj->defineFunction("selectFiles", _SE(jsbSelectFiles));
+    se::ScriptEngine::getInstance()->addBeforeCleanupHook([]() { gFilePickerCallback.setUndefined(); });
     return true;
 }

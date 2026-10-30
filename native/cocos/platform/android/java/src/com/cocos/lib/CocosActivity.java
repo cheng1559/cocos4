@@ -25,6 +25,7 @@
 package com.cocos.lib;
 
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -180,6 +181,13 @@ public class CocosActivity extends GameActivity {
             for (CocosSurfaceView surfaceView : mSurfaceViewArray) {
                 surfaceView.setVisibility(View.INVISIBLE);
             }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (!CocosFilePicker.onActivityResult(this, requestCode, resultCode, data)) {
+            super.onActivityResult(requestCode, resultCode, data);
         }
     }
 

@@ -1962,16 +1962,18 @@ void cmdFuncGLES3BeginRenderPass(GLES3Device *device, GLES3GPURenderPass *gpuRen
     }
 }
 
+// Grows the scissor to the union with the region. Compare far edges too: a region starting
+// inside a screen-sized scissor can still extend past it, e.g. an atlas copy below the screen height.
 static void ensureScissorRect(GLES3GPUStateCache *cache, int32_t x, int32_t y, uint32_t width, uint32_t height) {
-    if (cache->scissor.x > x ||
-        cache->scissor.y > y ||
-        cache->scissor.width < width ||
-        cache->scissor.height < height) {
-        cache->scissor.x = std::min(cache->scissor.x, x);
-        cache->scissor.y = std::min(cache->scissor.y, y);
-        cache->scissor.width = std::max(cache->scissor.width, width);
-        cache->scissor.height = std::max(cache->scissor.height, height);
-        GL_CHECK(glScissor(cache->scissor.x, cache->scissor.y, cache->scissor.width, cache->scissor.height));
+    Rect &scissor = cache->scissor;
+    const int64_t right = int64_t(x) + width, bottom = int64_t(y) + height;
+    const int64_t scissorRight = int64_t(scissor.x) + scissor.width, scissorBottom = int64_t(scissor.y) + scissor.height;
+    if (scissor.x > x || scissor.y > y || scissorRight < right || scissorBottom < bottom) {
+        scissor.x = std::min(scissor.x, x);
+        scissor.y = std::min(scissor.y, y);
+        scissor.width = static_cast<uint32_t>(std::max(scissorRight, right) - scissor.x);
+        scissor.height = static_cast<uint32_t>(std::max(scissorBottom, bottom) - scissor.y);
+        GL_CHECK(glScissor(scissor.x, scissor.y, scissor.width, scissor.height));
     }
 }
 
