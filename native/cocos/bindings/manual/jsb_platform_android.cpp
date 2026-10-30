@@ -29,6 +29,9 @@
 #include "cocos/bindings/manual/jsb_global.h"
 #include "cocos/platform/FileUtils.h"
 #include "cocos/platform/java/jni/JniHelper.h"
+#if CC_USE_EDITBOX
+    #include "cocos/ui/edit-box/EditBox.h"
+#endif
 
 #include <regex>
 
@@ -124,9 +127,39 @@ extern "C" JNIEXPORT void JNICALL Java_com_cocos_lib_CocosFilePicker_onFilesSele
     completeFileSelection(callback, result, error ? message.c_str() : nullptr);
 }
 
+#if CC_USE_EDITBOX
+// The game draws an input-only field's text and caret, and keeps the native editor's text and selection in step.
+static bool jsbSetInputBoxText(se::State &s) { // NOLINT
+    const auto &args = s.args();
+    SE_PRECONDITION2(args.size() == 3 && args[0].isString() && args[1].isNumber() && args[2].isNumber(), false, "Expected text and selection range");
+    cc::EditBox::setText(args[0].toString(), args[1].toInt32(), args[2].toInt32());
+    return true;
+}
+SE_BIND_FUNC(jsbSetInputBoxText)
+
+static bool jsbGetInputBoxSelection(se::State &s) { // NOLINT
+    int start = 0;
+    int end = 0;
+    if (cc::EditBox::getSelection(start, end)) {
+        se::HandleObject range(se::Object::createPlainObject());
+        range->setProperty("start", se::Value(start));
+        range->setProperty("end", se::Value(end));
+        s.rval().setObject(range);
+    } else {
+        s.rval().setNull();
+    }
+    return true;
+}
+SE_BIND_FUNC(jsbGetInputBoxSelection)
+#endif
+
 bool register_platform_bindings(se::Object * /*obj*/) { // NOLINT(readability-identifier-naming)
     __jsbObj->defineFunction("loadFont", _SE(jsbLoadFont));
     __jsbObj->defineFunction("selectFiles", _SE(jsbSelectFiles));
+#if CC_USE_EDITBOX
+    __jsbObj->defineFunction("setInputBoxText", _SE(jsbSetInputBoxText));
+    __jsbObj->defineFunction("getInputBoxSelection", _SE(jsbGetInputBoxSelection));
+#endif
     se::ScriptEngine::getInstance()->addBeforeCleanupHook([]() { gFilePickerCallback.setUndefined(); });
     return true;
 }

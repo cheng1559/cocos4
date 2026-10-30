@@ -79,8 +79,23 @@ void EditBox::show(const cc::EditBox::ShowInfo &showInfo) {
                                     showInfo.isMultiline,
                                     showInfo.confirmHold,
                                     showInfo.confirmType,
-                                    showInfo.inputType);
+                                    showInfo.inputType,
+                                    showInfo.autocorrect,
+                                    showInfo.inputOnly);
     _isShown = true;
+}
+
+void EditBox::setText(const ccstd::string &text, int start, int end) {
+    if (!_isShown) return;
+    JniHelper::callStaticVoidMethod(JCLS_EDITBOX, "setTextNative", text, start, end);
+}
+
+bool EditBox::getSelection(int &start, int &end) {
+    if (!_isShown) return false;
+    // Only the input-only editor reports a selection; the activity editor shows its own caret.
+    start = JniHelper::callStaticIntMethod(JCLS_EDITBOX, "getSelectionStartNative");
+    end = JniHelper::callStaticIntMethod(JCLS_EDITBOX, "getSelectionEndNative");
+    return start >= 0 && end >= 0;
 }
 
 void EditBox::hide() {

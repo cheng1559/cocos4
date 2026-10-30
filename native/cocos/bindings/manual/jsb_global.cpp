@@ -864,6 +864,11 @@ static bool JSB_showInputBox(se::State &s) { // NOLINT
             showInfo.autocorrect = tmp.toBoolean();
         }
 
+        if (obj->getProperty("inputOnly", &tmp) && !tmp.isUndefined()) {
+            SE_PRECONDITION2(tmp.isBoolean(), false, "inputOnly is invalid!");
+            showInfo.inputOnly = tmp.toBoolean();
+        }
+
         if (obj->getProperty("confirmHold", &tmp)) {
             SE_PRECONDITION2(tmp.isBoolean(), false, "confirmHold is invalid!");
             if (!tmp.isUndefined()) {

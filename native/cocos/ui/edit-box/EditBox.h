@@ -48,6 +48,8 @@ public:
         bool confirmHold = false;
         bool isMultiline = false;
         bool autocorrect = true;
+        // The game draws its own field: the native editor only receives keyboard input (Android).
+        bool inputOnly = false;
         //NEW PROPERTIES
         uint32_t fontSize = 20;
         uint32_t fontColor = 0x00000000;
@@ -63,7 +65,7 @@ public:
     static void show(const ShowInfo &showInfo);
     static void hide();
 
-#if CC_PLATFORM == CC_PLATFORM_MACOS || CC_PLATFORM == CC_PLATFORM_IOS || CC_PLATFORM == CC_PLATFORM_WINDOWS
+#if CC_PLATFORM == CC_PLATFORM_MACOS || CC_PLATFORM == CC_PLATFORM_IOS || CC_PLATFORM == CC_PLATFORM_WINDOWS || CC_PLATFORM == CC_PLATFORM_ANDROID
     static void setText(const ccstd::string &text, int start, int end);
     static bool getSelection(int &start, int &end);
 #endif
