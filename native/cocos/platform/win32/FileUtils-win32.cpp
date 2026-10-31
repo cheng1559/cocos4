@@ -331,6 +331,10 @@ bool FileUtilsWin32::removeFile(const ccstd::string &filepath) {
 
 bool FileUtilsWin32::removeDirectory(const ccstd::string &dirPath) {
     std::wstring wpath = StringUtf8ToWideChar(dirPath);
+    // Children are found and named by appending to the path, so it must end with a separator.
+    if (!wpath.empty() && wpath.back() != L'/' && wpath.back() != L'\\') {
+        wpath += L'/';
+    }
     std::wstring files = wpath + L"*.*";
     WIN32_FIND_DATA wfd;
     HANDLE search = FindFirstFileEx(files.c_str(), FindExInfoStandard, &wfd, FindExSearchNameMatch, NULL, 0);
