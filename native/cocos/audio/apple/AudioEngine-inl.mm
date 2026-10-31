@@ -570,7 +570,9 @@ void AudioEngineImpl::update(float dt) {
             _threadMutex.unlock();
             delete player;
             _unusedSourcesPool.push_back(alSource);
-        } else if (player->_ready && sourceState == AL_STOPPED) {
+        } else if (player->_ready && sourceState == AL_STOPPED
+                   // A stream whose buffer thread is still running only ran dry; that thread restarts it.
+                   && !(player->_streamingSource && player->_rotateBufferThread && !player->_isRotateThreadExited)) {
             ccstd::string filePath;
             if (player->_finishCallbak) {
                 auto &audioInfo = AudioEngine::sAudioIDInfoMap[audioID];

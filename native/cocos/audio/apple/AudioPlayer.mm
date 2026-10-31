@@ -266,7 +266,11 @@ void AudioPlayer::rotateBufferThread(int offsetFrame) {
              * is playing as it's too short. Interesting IOS system.
              * Solution is to load buffer even if it's paused, just make sure that there's no bufferProcessed in 
              */
-            if (sourceState == AL_PLAYING || sourceState == AL_PAUSED) {
+            // The queue holds only QUEUEBUFFER_NUM * QUEUEBUFFER_TIME_STEP of audio. If this thread falls behind (a busy
+            // game thread, or App Nap stretching the sleep below), the source plays it dry and stops; refill and restart
+            // it, since a stream only ends after this thread exits. AudioEngineImpl::update keeps such players alive.
+            const bool starved = sourceState == AL_STOPPED;
+            if (sourceState == AL_PLAYING || sourceState == AL_PAUSED || starved) {
                 alGetSourcei(_alSource, AL_BUFFERS_PROCESSED, &bufferProcessed);
                 while (bufferProcessed > 0) {
                     bufferProcessed--;
@@ -311,6 +315,10 @@ void AudioPlayer::rotateBufferThread(int offsetFrame) {
                     }
                     alBufferData(bid, _audioCache->_format, tmpBuffer, framesRead * decoder.getBytesPerFrame(), decoder.getSampleRate());
                     alSourceQueueBuffers(_alSource, 1, &bid);
+                }
+                if (starved && !needToExitThread) {
+                    ALOGW("Audio stream ran out of buffers; restarting playback");
+                    alSourcePlay(_alSource);
                 }
             }
 
