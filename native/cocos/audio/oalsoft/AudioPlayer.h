@@ -73,6 +73,8 @@ protected:
     bool _isDestroyed;
     bool _removeByAudioEngine;
     bool _ready;
+    // A pause that arrived while the cache was still loading; play2d applies it once the source starts.
+    bool _pausedBeforeReady{false};
     ALuint _alSource;
 
     //play by circular buffer

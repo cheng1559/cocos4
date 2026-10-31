@@ -206,6 +206,7 @@ bool AudioPlayer::play2d() {
             // abort playing if the state is incorrect
             break;
         }
+        if (_pausedBeforeReady) alSourcePause(_alSource);
         _ready = true;
         ret = true;
     } while (false);

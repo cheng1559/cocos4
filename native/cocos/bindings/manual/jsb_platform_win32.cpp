@@ -39,6 +39,7 @@
 #include <shobjidl.h>
 #include <wrl/client.h>
 #include "cocos/platform/SDLHelper.h"
+#include "cocos/bindings/manual/jsb_sdl_cursor.h"
 
 #include <regex>
 #include <algorithm>
@@ -322,6 +323,7 @@ static bool jsbSetCursorStyle(se::State &s) {
     return true;
 }
 SE_BIND_FUNC(jsbSetCursorStyle)
+SE_BIND_FUNC(setSdlCursorImage)
 
 static bool jsbSelectFiles(se::State &s) {
     const auto &args = s.args();
@@ -407,6 +409,7 @@ bool register_platform_bindings(se::Object * /*obj*/) { // NOLINT(readability-id
     __jsbObj->defineFunction("isWindowFullScreen", _SE(jsbIsWindowFullScreen));
     __jsbObj->defineFunction("setWindowFullScreen", _SE(jsbSetWindowFullScreen));
     __jsbObj->defineFunction("setCursorStyle", _SE(jsbSetCursorStyle));
+    __jsbObj->defineFunction("setCursorImage", _SE(setSdlCursorImage));
     __jsbObj->defineFunction("selectFiles", _SE(jsbSelectFiles));
     return true;
 }

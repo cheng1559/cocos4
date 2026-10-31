@@ -302,8 +302,10 @@ void AudioEngineImpl::play2dImpl(AudioCache *cache, int audioID) {
         if (playerIt != _audioPlayers.end() && playerIt->second->play2d()) {
             if (auto sche = _scheduler.lock()) {
                 sche->performFunctionInCocosThread([audioID]() {
-                    if (AudioEngine::sAudioIDInfoMap.find(audioID) != AudioEngine::sAudioIDInfoMap.end()) {
-                        AudioEngine::sAudioIDInfoMap[audioID].state = AudioEngine::AudioState::PLAYING;
+                    auto it = AudioEngine::sAudioIDInfoMap.find(audioID);
+                    // A pause issued since play2d stays: overwriting it would make the next resume a no-op.
+                    if (it != AudioEngine::sAudioIDInfoMap.end() && it->second.state != AudioEngine::AudioState::PAUSED) {
+                        it->second.state = AudioEngine::AudioState::PLAYING;
                     }
                 });
             }
@@ -378,8 +380,17 @@ bool AudioEngineImpl::pause(int audioID) {
     if (!checkAudioIdValid(audioID)) {
         return false;
     }
+    auto *player = _audioPlayers[audioID];
+    {
+        // The source has not started yet; pausing it now would be a no-op and play2d would start it audibly.
+        std::lock_guard<std::mutex> lck(player->_play2dMutex);
+        if (!player->_ready) {
+            player->_pausedBeforeReady = true;
+            return true;
+        }
+    }
     bool ret = true;
-    alSourcePause(_audioPlayers[audioID]->_alSource);
+    alSourcePause(player->_alSource);
 
     auto error = alGetError();
     if (error != AL_NO_ERROR) {
@@ -394,8 +405,16 @@ bool AudioEngineImpl::resume(int audioID) {
     if (!checkAudioIdValid(audioID)) {
         return false;
     }
+    auto *player = _audioPlayers[audioID];
+    {
+        std::lock_guard<std::mutex> lck(player->_play2dMutex);
+        if (!player->_ready) {
+            player->_pausedBeforeReady = false;
+            return true;
+        }
+    }
     bool ret = true;
-    alSourcePlay(_audioPlayers[audioID]->_alSource);
+    alSourcePlay(player->_alSource);
 
     auto error = alGetError();
     if (error != AL_NO_ERROR) {

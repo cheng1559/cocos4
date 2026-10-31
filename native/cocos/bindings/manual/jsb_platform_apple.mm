@@ -39,6 +39,7 @@
 #import <objc/runtime.h>
 #include <SDL2/SDL.h>
 #include "cocos/platform/SDLHelper.h"
+#include "cocos/bindings/manual/jsb_sdl_cursor.h"
 #elif CC_PLATFORM == CC_PLATFORM_IOS
 #import <UIKit/UIKit.h>
 #import <MobileCoreServices/MobileCoreServices.h>
@@ -278,6 +279,7 @@ static bool JSB_setCursorStyle(se::State &s) {
     return true;
 }
 SE_BIND_FUNC(JSB_setCursorStyle)
+SE_BIND_FUNC(setSdlCursorImage)
 
 static bool JSB_selectFiles(se::State &s) {
     const auto &args = s.args();
@@ -408,6 +410,7 @@ bool register_platform_bindings(se::Object *obj) {
     __jsbObj->defineFunction("isWindowFullScreen", _SE(JSB_isWindowFullScreen));
     __jsbObj->defineFunction("setWindowFullScreen", _SE(JSB_setWindowFullScreen));
     __jsbObj->defineFunction("setCursorStyle", _SE(JSB_setCursorStyle));
+    __jsbObj->defineFunction("setCursorImage", _SE(setSdlCursorImage));
     __jsbObj->defineFunction("selectFiles", _SE(JSB_selectFiles));
 #if CC_USE_EDITBOX
     __jsbObj->setProperty("onInputBoxKey", se::Value::Null);

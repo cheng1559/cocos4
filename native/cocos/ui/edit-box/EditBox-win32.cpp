@@ -164,14 +164,23 @@ LRESULT editWindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         case WM_IME_ENDCOMPOSITION: g_composing = false; break;
         case WM_KEYDOWN:
             if (!g_composing && handleInputKey(wParam)) {
-                g_handledKey = wParam;
+                // The handler may have closed the box; a stale key would swallow the next box's character.
+                if (g_hwndEditBox == hwnd) g_handledKey = wParam;
+                // As on macOS, the game still receives the handled key: it skips this press and forgets it on
+                // release. Without the press, SDL would drop the release and the game would skip the next press.
+                SendMessage(getCurrentWindowHwnd(), msg, wParam, lParam);
                 return 0;
             }
             break;
         case WM_CHAR:
             if (g_handledKey == wParam && (wParam == VK_TAB || wParam == VK_RETURN || wParam == VK_ESCAPE)) return 0;
             break;
+        case WM_SYSKEYUP:
         case WM_KEYUP:
+            // A key pressed before the box took focus (e.g. the one that opened it) is released here.
+            // Let SDL see the release, or the game keeps it held and treats the next press as a repeat.
+            SendMessage(getCurrentWindowHwnd(), msg, wParam, lParam);
+            if (msg == WM_SYSKEYUP) break;
             if (g_handledKey == wParam) { g_handledKey = 0; return 0; }
             if (wParam == VK_RETURN && !g_isMultiline) {
                 EditBox::complete();
