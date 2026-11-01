@@ -155,6 +155,12 @@ SDLHelper::~SDLHelper() {
 }
 
 int SDLHelper::init() {
+#if CC_PLATFORM == CC_PLATFORM_WINDOWS
+    // Render at the physical resolution of scaled displays instead of letting Windows stretch the window.
+    // SDL_HINT_WINDOWS_DPI_SCALING stays off, so SDL sizes, positions and mouse events are all physical pixels
+    // and the device pixel ratio stays 1.
+    SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+#endif
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         // Display error message
         CC_LOG_ERROR("SDL could not initialize! SDL_Error: %s\n", SDL_GetError());

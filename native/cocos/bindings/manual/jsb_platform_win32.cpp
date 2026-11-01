@@ -194,6 +194,9 @@ static void constrainWindowPosition(HWND window, WINDOWPOS &position, bool maxim
     position.cy = rect.bottom;
 }
 
+// True while SDL moves the window to the rect Windows suggests for a new DPI.
+static bool changingDpi = false;
+
 static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     if (message == WM_ENTERSIZEMOVE) {
         GetClientRect(window, &resizeStartClient);
@@ -208,6 +211,11 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
         static_cast<WindowsPlatform *>(BasePlatform::getPlatform())->renderDuringResize();
         return 0;
     }
+    else if (message == WM_GETDPISCALEDSIZE) {
+        // Dragged to a monitor with another scale, keep the window's apparent size like other per-monitor aware
+        // apps: FALSE asks Windows for linear scaling, where SDL would keep the client size in pixels.
+        return FALSE;
+    }
     auto *sdlWindow = getMainWindow();
     if (sdlWindow && !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN) && !IsIconic(window)) {
         if (message == WM_SIZING) {
@@ -220,12 +228,16 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
             auto &position = *reinterpret_cast<WINDOWPOS *>(lParam);
             // Skip only the WM_SIZING result; Windows Snap can submit a different size during the same drag.
             const bool alreadyConstrained = resizingWindow && position.cx == resizeTargetSize.cx && position.cy == resizeTargetSize.cy;
-            if (!(position.flags & SWP_NOSIZE) && !alreadyConstrained) {
+            // Windows' suggested rect for a new DPI keeps the window under the cursor mid-drag; constraining it here
+            // would use the old DPI's frame, re-centre it and pull it onto one monitor. The pass after it fixes the size.
+            if (!(position.flags & SWP_NOSIZE) && !alreadyConstrained && !changingDpi) {
                 constrainWindowPosition(window, position);
             }
         }
     }
+    changingDpi = message == WM_DPICHANGED;
     const auto result = CallWindowProcW(previousWindowProc, window, message, wParam, lParam);
+    changingDpi = false;
     if (message == WM_GETMINMAXINFO && sdlWindow && !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN)) {
         MONITORINFO monitor{sizeof(MONITORINFO)};
         if (GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) {
@@ -240,6 +252,13 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
             limits.ptMaxPosition = {position.x - monitor.rcMonitor.left, position.y - monitor.rcMonitor.top};
             return 0;
         }
+    }
+    if (message == WM_DPICHANGED && sdlWindow && !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN) &&
+        !IsIconic(window) && !IsZoomed(window)) {
+        // Constrain the suggested size with the new DPI's frame, keeping the position.
+        RECT rect{};
+        GetWindowRect(window, &rect);
+        SetWindowPos(window, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
     // SDL must queue the new size before rendering; WM_TIMER alone can leave a stale frame during live resize.
     if (resizingWindow && (message == WM_SIZE || message == WM_PAINT)) {
@@ -287,10 +306,12 @@ static bool jsbSetWindowFullScreen(se::State &s) {
     POINT cursor{};
     const bool restoreCursor = window && SDL_GetMouseFocus() == window &&
         SDL_GetRelativeMouseMode() == SDL_FALSE && GetCursorPos(&cursor);
+    // Leaving fullscreen centres the window on the display it was fullscreen on, not the primary one.
+    const int display = window ? std::max(0, SDL_GetWindowDisplayIndex(window)) : 0;
     const bool success = window && SDL_SetWindowFullscreen(
         window, args[0].toBoolean() ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) == 0;
     if (success && !args[0].toBoolean()) {
-        SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+        SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED_DISPLAY(display), SDL_WINDOWPOS_CENTERED_DISPLAY(display));
     }
     // SDL restores client coordinates during fullscreen changes; preserve the desktop position instead.
     if (restoreCursor) SetCursorPos(cursor.x, cursor.y);

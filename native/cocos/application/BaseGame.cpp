@@ -23,6 +23,7 @@
 ****************************************************************************/
 
 #include "BaseGame.h"
+#include <cmath>
 #include <string>
 #include "ApplicationManager.h"
 #include "platform/interfaces/modules/ISystemWindowManager.h"
@@ -30,6 +31,8 @@
 
 #if CC_PLATFORM == CC_PLATFORM_ANDROID
     #include "platform/android/adpf_manager.h"
+#elif CC_PLATFORM == CC_PLATFORM_WINDOWS
+    #include "SDL2/SDL.h"
 #endif
 extern "C" void cc_load_all_plugins(); // NOLINT
 
@@ -54,8 +57,15 @@ int BaseGame::init() {
     // override default value
     //_windowInfo.x      = _windowInfo.x == -1 ? 0 : _windowInfo.x;
     //_windowInfo.y      = _windowInfo.y == -1 ? 0 : _windowInfo.y;
-    _windowInfo.width = _windowInfo.width == -1 ? 800 : _windowInfo.width;
-    _windowInfo.height = _windowInfo.height == -1 ? 600 : _windowInfo.height;
+    #if CC_PLATFORM == CC_PLATFORM_WINDOWS
+    // Windows sizes are physical pixels (see SDLHelper::init); scale the default as a DPI-unaware window would be.
+    float dpi = 0;
+    const float scale = SDL_GetDisplayDPI(0, nullptr, &dpi, nullptr) == 0 && dpi > 0 ? dpi / 96 : 1;
+    #else
+    const float scale = 1;
+    #endif
+    _windowInfo.width = _windowInfo.width == -1 ? static_cast<int>(std::lround(800 * scale)) : _windowInfo.width;
+    _windowInfo.height = _windowInfo.height == -1 ? static_cast<int>(std::lround(600 * scale)) : _windowInfo.height;
     if (_windowInfo.flags == -1) {
         _windowInfo.flags = cc::ISystemWindow::CC_WINDOW_SHOWN |
                             cc::ISystemWindow::CC_WINDOW_INPUT_FOCUS;
