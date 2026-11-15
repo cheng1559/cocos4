@@ -30,6 +30,8 @@ import { director, DirectorEvent } from '../../game/director';
 import { NodeEventType } from '../../scene-graph/node-event';
 import { IMask } from '../../scene-graph/node-event-processor';
 import type { Mask } from '../components/mask';
+import type { Camera } from '../../render-scene/scene/camera';
+import { windowToCameraScreen } from '../../misc/camera-presentation';
 
 const _vec2a = new Vec2();
 const _vec2b = new Vec2();
@@ -452,6 +454,23 @@ export class UITransform extends Component {
     }
 
     /**
+     * @en Converts a point of the system window into the screen space of a camera, which the camera's `screenToWorld`
+     * takes. They are the same for a camera rendering to the window. A camera rendering to a texture has no place in
+     * the window, unless the texture is presented stretched over it (`Camera.presentedOnWindow`): the point is then
+     * as far into the texture as it is into the window.
+     * @zh 把系统窗口中的点转换到相机自己的屏幕空间（相机 `screenToWorld` 所用的坐标）。渲染到窗口的相机两者相同。
+     * 渲染到贴图的相机在窗口中没有位置，除非该贴图被拉伸铺满窗口呈现（`Camera.presentedOnWindow`），
+     * 这时按点在窗口中的比例换算到贴图中。
+     * @param camera @en The render camera. @zh 渲染相机。
+     * @param windowPos @en The point in the system window. @zh 系统窗口中的点。
+     * @param out @en The point in the camera's screen space. @zh 相机屏幕空间中的点。
+     * @returns @en false if the camera takes no point of the window. @zh 相机不接收窗口中的点时返回 false。
+     */
+    public static windowToCameraScreen (camera: Camera, windowPos: Readonly<Vec3>, out: Vec3): boolean {
+        return windowToCameraScreen(camera, windowPos, out);
+    }
+
+    /**
      * @zh 屏幕空间中的点击测试。
      * @en Hit test with point in Screen Space.
      *
@@ -467,13 +486,14 @@ export class UITransform extends Component {
         const cameras = this._getRenderScene().cameras;
         for (let i = 0; i < cameras.length; i++) {
             const camera = cameras[i];
-            if (!(camera.visibility & this.node.layer) || (camera.window && !camera.window.swapchain)) { continue; }
+            if (!(camera.visibility & this.node.layer)) { continue; }
             if (camera.systemWindowId !== windowId) {
                 continue;
             }
 
             // Convert Screen Space into World Space.
             Vec3.set(v3WorldPt, screenPoint.x, screenPoint.y, 0);  // vec3 screen pos
+            if (!UITransform.windowToCameraScreen(camera, v3WorldPt, v3WorldPt)) { continue; }
             camera.screenToWorld(v3WorldPt, v3WorldPt);
             Vec2.set(v2WorldPt, v3WorldPt.x, v3WorldPt.y);
 

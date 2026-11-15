@@ -43,6 +43,7 @@ import { property } from '../core/data/class-decorator';
 import type { Ray } from '../core/geometry';
 import type { View } from '../ui/view';
 import type { Root } from '../root';
+import { setCameraPresentedOnWindow } from './camera-presentation';
 
 const _temp_vec3_1 = new Vec3();
 
@@ -182,6 +183,7 @@ export class Camera extends Component {
     protected _usePostProcess = false;
 
     protected _camera: scene.Camera | null = null;
+    protected _presentedOnWindow = false;
     protected _inEditorMode = false;
     protected _flows: string[] | undefined = undefined;
     @serializable
@@ -503,6 +505,24 @@ export class Camera extends Component {
         this.node.emit(CameraEvent.TARGET_TEXTURE_CHANGE, this);
     }
 
+    /**
+     * @en The texture this camera renders to (`targetTexture`) is presented stretched over the whole system window,
+     * so the camera takes the window's pointer in UI hit tests as a camera rendering to the window does: a point of
+     * the window is as far into the texture as it is into the window. Without it a camera rendering to a texture
+     * takes no pointer. Not serialized.
+     * @zh 此相机渲染到的贴图（`targetTexture`）被拉伸铺满整个系统窗口呈现，因此在 UI 点击测试中，
+     * 它像渲染到窗口的相机一样接收窗口的指针：窗口中的点按比例换算到贴图中。
+     * 未设置时，渲染到贴图的相机不接收指针。不参与序列化。
+     */
+    get presentedOnWindow (): boolean {
+        return this._presentedOnWindow;
+    }
+
+    set presentedOnWindow (value) {
+        this._presentedOnWindow = value;
+        if (this._camera) { setCameraPresentedOnWindow(this._camera, value); }
+    }
+
     @tooltip('i18n:camera.use_postprocess')
     @property
     get usePostProcess (): boolean {
@@ -700,6 +720,7 @@ export class Camera extends Component {
     public _createCamera (): void {
         if (!this._camera) {
             this._camera = (cclegacy.director.root as Root).createCamera();
+            if (this._presentedOnWindow) { setCameraPresentedOnWindow(this._camera, true); }
             this._camera.initialize({
                 name: this.node.name,
                 node: this.node,
