@@ -145,6 +145,9 @@ static void constrainWindowPosition(HWND window, WINDOWPOS &position, bool maxim
     RECT frame{}, client{};
     GetWindowRect(window, &frame);
     GetClientRect(window, &client);
+    // Only a window asked for a new size is kept on the work area: one dragged by its caption keeps its size and, like
+    // any other, may go past the screen's edges or onto another monitor.
+    const bool moving = !maximized && position.cx == frame.right - frame.left && position.cy == frame.bottom - frame.top;
     const bool verticalStretch = !maximized && hasWorkArea && position.cy >= monitor.rcWork.bottom - monitor.rcWork.top &&
         position.cx < monitor.rcWork.right - monitor.rcWork.left;
     if (hasWorkArea) {
@@ -185,7 +188,7 @@ static void constrainWindowPosition(HWND window, WINDOWPOS &position, bool maxim
     if (!(position.flags & SWP_NOMOVE)) {
         position.x += (position.cx - rect.right) / 2;
         position.y += (position.cy - rect.bottom) / 2;
-        if (hasWorkArea) {
+        if (hasWorkArea && !moving) {
             position.x = std::clamp<LONG>(position.x, monitor.rcWork.left, monitor.rcWork.right - rect.right);
             position.y = std::clamp<LONG>(position.y, monitor.rcWork.top, monitor.rcWork.bottom - rect.bottom);
         }
@@ -324,8 +327,14 @@ static bool jsbSetCursorStyle(se::State &s) {
     const auto &args = s.args();
     SE_PRECONDITION2(args.size() == 1 && args[0].isString(), false, "Expected a cursor style string");
 
-    SDL_SystemCursor cursorId = SDL_SYSTEM_CURSOR_ARROW;
     const auto &style = args[0].toString();
+    // "none" hides the cursor over the window, e.g. while the game draws its own; any other style shows it again.
+    if (style == "none") {
+        s.rval().setBoolean(SDL_ShowCursor(SDL_DISABLE) >= 0);
+        return true;
+    }
+    SDL_ShowCursor(SDL_ENABLE);
+    SDL_SystemCursor cursorId = SDL_SYSTEM_CURSOR_ARROW;
     if (style == "pointer") {
         cursorId = SDL_SYSTEM_CURSOR_HAND;
     } else if (style == "move") {

@@ -59,7 +59,10 @@ inline bool setSdlCursorImage(se::State &s) {
     SE_PRECONDITION2(args.size() == 3 && args[0].isString() && args[1].isNumber() && args[2].isNumber(), false,
                      "Expected an image path and hotspot");
     SDL_Cursor *cursor = getSdlImageCursor(args[0].toString(), args[1].toInt32(), args[2].toInt32());
-    if (cursor) SDL_SetCursor(cursor);
+    if (cursor) {
+        SDL_ShowCursor(SDL_ENABLE);
+        SDL_SetCursor(cursor);
+    }
     s.rval().setBoolean(cursor != nullptr);
     return true;
 }

@@ -259,8 +259,14 @@ static bool JSB_setCursorStyle(se::State &s) {
     const auto &args = s.args();
     SE_PRECONDITION2(args.size() == 1 && args[0].isString(), false, "Expected a cursor style string");
 
-    SDL_SystemCursor cursorId = SDL_SYSTEM_CURSOR_ARROW;
     const auto &style = args[0].toString();
+    // "none" hides the cursor over the window, e.g. while the game draws its own; any other style shows it again.
+    if (style == "none") {
+        s.rval().setBoolean(SDL_ShowCursor(SDL_DISABLE) >= 0);
+        return true;
+    }
+    SDL_ShowCursor(SDL_ENABLE);
+    SDL_SystemCursor cursorId = SDL_SYSTEM_CURSOR_ARROW;
     if (style == "pointer") {
         cursorId = SDL_SYSTEM_CURSOR_HAND;
     } else if (style == "move") {
