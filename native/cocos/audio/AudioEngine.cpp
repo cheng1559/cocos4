@@ -314,6 +314,8 @@ void AudioEngine::setVolumeFactor(float factor) {
 }
 
 void AudioEngine::pause(int audioID) {
+    // An explicit pause takes ownership even when the background handler paused this ID first.
+    sBreakAudioID.erase(std::remove(sBreakAudioID.begin(), sBreakAudioID.end(), audioID), sBreakAudioID.end());
     auto it = sAudioIDInfoMap.find(audioID);
     if (it != sAudioIDInfoMap.end() && it->second.state == AudioState::PLAYING) {
         sAudioEngineImpl->pause(audioID);

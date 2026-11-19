@@ -60,6 +60,7 @@ events::EnterForeground::Listener EventDispatcher::listenerEnterForeground;
 events::EnterBackground::Listener EventDispatcher::listenerEnterBackground;
 events::WindowLeave::Listener EventDispatcher::listenerWindowLeave;
 events::WindowEnter::Listener EventDispatcher::listenerWindowEnter;
+events::WindowFocusChanged::Listener EventDispatcher::listenerWindowFocusChanged;
 events::WindowChanged::Listener EventDispatcher::listenerWindowChanged;
 events::LowMemory::Listener EventDispatcher::listenerLowMemory;
 events::Touch::Listener EventDispatcher::listenerTouch;
@@ -98,6 +99,12 @@ void EventDispatcher::init() {
         listenerEnterBackground.bind(&dispatchEnterBackgroundEvent);
         listenerWindowLeave.bind(&dispatchWindowLeaveEvent);
         listenerWindowEnter.bind(&dispatchWindowEnterEvent);
+        listenerWindowFocusChanged.bind([](bool focused) {
+            if (!EventDispatcher::initialized() || __jsbObj == nullptr) return;
+            se::AutoHandleScope scope;
+            __jsbObj->setProperty("windowFocused", se::Value(focused));
+            EventDispatcher::doDispatchJsEvent("onWindowFocusChanged", {se::Value(focused)});
+        });
         listenerEnterForeground.bind(&dispatchEnterForegroundEvent);
         listenerLowMemory.bind(&dispatchMemoryWarningEvent);
         listenerClose.bind(&dispatchCloseEvent);

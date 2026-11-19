@@ -160,6 +160,8 @@ int SDLHelper::init() {
     // SDL_HINT_WINDOWS_DPI_SCALING stays off, so SDL sizes, positions and mouse events are all physical pixels
     // and the device pixel ratio stays 1.
     SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2");
+    // Deliver the activating click to the game so a paused window can resume on that click.
+    SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
 #endif
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         // Display error message
@@ -180,6 +182,12 @@ void SDLHelper::dispatchWindowEvent(uint32_t windowId, const SDL_WindowEvent &we
     ev.windowId = windowId;
 
     switch (wevent.event) {
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+        case SDL_WINDOWEVENT_FOCUS_LOST:
+            if (windowId == ISystemWindow::mainWindowId) {
+                events::WindowFocusChanged::broadcast(wevent.event == SDL_WINDOWEVENT_FOCUS_GAINED);
+            }
+            break;
         case SDL_WINDOWEVENT_ENTER: {
             ev.type = WindowEvent::Type::ENTER;
             events::WindowEvent::broadcast(ev);

@@ -148,6 +148,9 @@ declare namespace jsb {
     export let onClose: () => void | undefined;
     export let onWindowLeave: () => void | undefined;
     export let onWindowEnter: () => void | undefined;
+    /** Focus of the main desktop window. */
+    export const windowFocused: boolean | undefined;
+    export let onWindowFocusChanged: ((focused: boolean) => void) | undefined;
     export function openURL(url: string): void;
     export function garbageCollect(): void;
     export const isWindowFullScreen: (() => boolean) | undefined;

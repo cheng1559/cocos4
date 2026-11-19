@@ -65,6 +65,7 @@ private:
     static events::EnterBackground::Listener listenerEnterBackground;
     static events::WindowLeave::Listener listenerWindowLeave;
     static events::WindowEnter::Listener listenerWindowEnter;
+    static events::WindowFocusChanged::Listener listenerWindowFocusChanged;
     static events::WindowChanged::Listener listenerWindowChanged;
     static events::LowMemory::Listener listenerLowMemory;
     static events::Touch::Listener listenerTouch;
