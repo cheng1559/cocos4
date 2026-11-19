@@ -178,6 +178,11 @@ static int MetalViewEventWatch(void* userData, SDL_Event*event) {
     return YES;
 }
 
+- (BOOL)acceptsFirstMouse:(NSEvent *)event {
+    // AppKit hit-tests this Metal view; the enclosing SDL content view owns the click-through policy.
+    return [self.superview acceptsFirstMouse:event];
+}
+
 - (int)getWindowId {
     auto *windowMgr = CC_GET_PLATFORM_INTERFACE(cc::SystemWindowManager);
     auto *window = windowMgr->getWindowFromNSWindow([self window]);
