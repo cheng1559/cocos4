@@ -1162,6 +1162,10 @@ void ScriptEngine::reportException(v8::Isolate *isolate, v8::Local<v8::Message> 
             args.emplace_back(linenum);
             args.emplace_back(exceptionMessage);
             args.emplace_back(stack);
+            if (exceptionObj->IsObject()) {
+                args.emplace_back();
+                internal::jsToSeValue(isolate, exceptionObj, &args.back());
+            }
             errorHandler.toObject()->call(args, _globalObj);
         }
 
