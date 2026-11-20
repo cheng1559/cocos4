@@ -117,12 +117,21 @@ static LONG lockedClientHeight(HWND window) {
     return static_cast<LONG>(std::lround(lockedWindowHeight * GetDpiForWindow(window) / 96.0));
 }
 
+/**
+ * The frame around the client area, by the window's style. Not by its rects: restored from minimized, the window has
+ * lost WS_MINIMIZE while its rects are still the icon's (146×30 over no client area at 96 DPI), which would make the
+ * frame that big and push the restored window out by as much.
+ */
+static SIZE frameSize(HWND window) {
+    RECT rect{};
+    AdjustWindowRectExForDpi(&rect, static_cast<DWORD>(GetWindowLongPtrW(window, GWL_STYLE)), FALSE,
+                             static_cast<DWORD>(GetWindowLongPtrW(window, GWL_EXSTYLE)), GetDpiForWindow(window));
+    return {rect.right - rect.left, rect.bottom - rect.top};
+}
+
 static void constrainWindowRect(HWND window, RECT &rect, bool vertical, UINT edge = 0) {
-    RECT frame{}, client{};
-    GetWindowRect(window, &frame);
-    GetClientRect(window, &client);
-    const LONG borderWidth = frame.right - frame.left - client.right;
-    const LONG borderHeight = frame.bottom - frame.top - client.bottom;
+    const SIZE frame = frameSize(window);
+    const LONG borderWidth = frame.cx, borderHeight = frame.cy;
     const double width = rect.right - rect.left - borderWidth, height = rect.bottom - rect.top - borderHeight;
     if (width <= 0 || height <= 0) return;
     if (const LONG lockedHeight = lockedClientHeight(window)) {
@@ -178,9 +187,8 @@ static void constrainWindowPosition(HWND window, WINDOWPOS &position, bool maxim
     maximized = maximized || IsZoomed(window);
     MONITORINFO monitor{sizeof(MONITORINFO)};
     const bool hasWorkArea = GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor) != FALSE;
-    RECT frame{}, client{};
+    RECT frame{};
     GetWindowRect(window, &frame);
-    GetClientRect(window, &client);
     // Only a window asked for a new size is kept on the work area: one dragged by its caption keeps its size and, like
     // any other, may go past the screen's edges or onto another monitor.
     const bool moving = !maximized && position.cx == frame.right - frame.left && position.cy == frame.bottom - frame.top;
@@ -214,8 +222,8 @@ static void constrainWindowPosition(HWND window, WINDOWPOS &position, bool maxim
         rect.bottom = maximized ? monitor.rcWork.bottom - monitor.rcWork.top
                                 : std::min(rect.bottom, monitor.rcWork.bottom - monitor.rcWork.top);
     }
-    const LONG width = rect.right - (frame.right - frame.left - client.right);
-    const LONG height = rect.bottom - (frame.bottom - frame.top - client.bottom);
+    const SIZE border = frameSize(window);
+    const LONG width = rect.right - border.cx, height = rect.bottom - border.cy;
     constrainWindowRect(window, rect, verticalStretch ? width > height * maximumWindowAspect : width < height * minimumWindowAspect);
     if (hasWorkArea && rect.right > monitor.rcWork.right - monitor.rcWork.left) {
         rect.right = monitor.rcWork.right - monitor.rcWork.left;
@@ -242,8 +250,9 @@ static void fitLockedHeight(HWND window) {
     const LONG lockedHeight = lockedClientHeight(window);
     if (!lockedHeight || client.right <= 0 || client.bottom <= 0) return;
     const double aspect = std::clamp(static_cast<double>(client.right) / client.bottom, minimumWindowAspect, maximumWindowAspect);
-    const LONG width = static_cast<LONG>(std::lround(lockedHeight * aspect)) + frame.right - frame.left - client.right;
-    const LONG height = lockedHeight + frame.bottom - frame.top - client.bottom;
+    const SIZE border = frameSize(window);
+    const LONG width = static_cast<LONG>(std::lround(lockedHeight * aspect)) + border.cx;
+    const LONG height = lockedHeight + border.cy;
     SetWindowPos(window, nullptr, (frame.left + frame.right - width) / 2, (frame.top + frame.bottom - height) / 2, width, height,
                  SWP_NOZORDER | SWP_NOACTIVATE);
 }
@@ -337,11 +346,8 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
             if (const LONG lockedHeight = lockedClientHeight(window)) {
                 // SDL pins a window it may not resize at whatever size it has, and lets only its own resizes past
                 // that; the locked range is the one that holds, for fitting the window to it and for DPI changes.
-                RECT frame{}, client{};
-                GetWindowRect(window, &frame);
-                GetClientRect(window, &client);
-                const LONG borderWidth = frame.right - frame.left - client.right;
-                const LONG borderHeight = frame.bottom - frame.top - client.bottom;
+                const SIZE frame = frameSize(window);
+                const LONG borderWidth = frame.cx, borderHeight = frame.cy;
                 const bool single = minimumWindowAspect == maximumWindowAspect;
                 const auto minimumWidth = static_cast<LONG>(single ? std::round(lockedHeight * minimumWindowAspect)
                                                                    : std::ceil(lockedHeight * minimumWindowAspect));
