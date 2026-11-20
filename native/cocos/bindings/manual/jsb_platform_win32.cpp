@@ -53,6 +53,11 @@ static HWND aspectWindow{nullptr};
 static WNDPROC previousWindowProc{nullptr};
 static double minimumWindowAspect{0};
 static double maximumWindowAspect{0};
+// The client height the window keeps, in logical pixels; 0 lets it take any height.
+static double lockedWindowHeight{0};
+// The window has yet to be brought to that height (it was fullscreen): until then the height is not held.
+static bool heightFitPending{false};
+static constexpr UINT FIT_HEIGHT_MESSAGE = WM_APP + 0xC51;
 static constexpr UINT_PTR RESIZE_TIMER_ID = 0xCC51;
 static bool resizingWindow{false};
 static RECT resizeStartClient{};
@@ -107,6 +112,12 @@ static SDL_Window *getMainWindow() {
     return SDL_GetWindowFromID(ISystemWindow::mainWindowId);
 }
 
+/** The client height the window keeps, in its own pixels; 0 when it may take any. */
+static LONG lockedClientHeight(HWND window) {
+    if (lockedWindowHeight <= 0 || heightFitPending) return 0;
+    return static_cast<LONG>(std::lround(lockedWindowHeight * GetDpiForWindow(window) / 96.0));
+}
+
 static void constrainWindowRect(HWND window, RECT &rect, bool vertical, UINT edge = 0) {
     RECT frame{}, client{};
     GetWindowRect(window, &frame);
@@ -115,6 +126,17 @@ static void constrainWindowRect(HWND window, RECT &rect, bool vertical, UINT edg
     const LONG borderHeight = frame.bottom - frame.top - client.bottom;
     const double width = rect.right - rect.left - borderWidth, height = rect.bottom - rect.top - borderHeight;
     if (width <= 0 || height <= 0) return;
+    if (const LONG lockedHeight = lockedClientHeight(window)) {
+        // The height stays; the width follows the aspect range at that height.
+        const LONG lockedWidth = static_cast<LONG>(minimumWindowAspect == maximumWindowAspect
+            ? std::round(lockedHeight * minimumWindowAspect)
+            : std::clamp(width, std::ceil(lockedHeight * minimumWindowAspect), std::floor(lockedHeight * maximumWindowAspect)));
+        if (edge == WMSZ_TOP || edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT) rect.top = rect.bottom - lockedHeight - borderHeight;
+        else rect.bottom = rect.top + lockedHeight + borderHeight;
+        if (edge == WMSZ_LEFT || edge == WMSZ_TOPLEFT || edge == WMSZ_BOTTOMLEFT) rect.left = rect.right - lockedWidth - borderWidth;
+        else rect.right = rect.left + lockedWidth + borderWidth;
+        return;
+    }
     if (edge == WMSZ_TOP || edge == WMSZ_BOTTOM) {
         // Vertical drags may grow the width, but shortening the height must not shrink it.
         vertical = width > height * maximumWindowAspect;
@@ -197,10 +219,30 @@ static void constrainWindowPosition(HWND window, WINDOWPOS &position, bool maxim
     position.cy = rect.bottom;
 }
 
+/** Brings the window to its locked height, at its aspect within the range, keeping its centre where it was. */
+static void fitLockedHeight(HWND window) {
+    RECT frame{}, client{};
+    GetWindowRect(window, &frame);
+    GetClientRect(window, &client);
+    heightFitPending = false;
+    const LONG lockedHeight = lockedClientHeight(window);
+    if (!lockedHeight || client.right <= 0 || client.bottom <= 0) return;
+    const double aspect = std::clamp(static_cast<double>(client.right) / client.bottom, minimumWindowAspect, maximumWindowAspect);
+    const LONG width = static_cast<LONG>(std::lround(lockedHeight * aspect)) + frame.right - frame.left - client.right;
+    const LONG height = lockedHeight + frame.bottom - frame.top - client.bottom;
+    SetWindowPos(window, nullptr, (frame.left + frame.right - width) / 2, (frame.top + frame.bottom - height) / 2, width, height,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 // True while SDL moves the window to the rect Windows suggests for a new DPI.
 static bool changingDpi = false;
 
+
 static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
+    if (message == WM_STYLECHANGING && wParam == GWL_STYLE && lockedWindowHeight > 0) {
+        // Held at a height, the window is never maximized, whatever style SDL rebuilds (leaving fullscreen, say).
+        reinterpret_cast<STYLESTRUCT *>(lParam)->styleNew &= ~WS_MAXIMIZEBOX;
+    }
     if (message == WM_ENTERSIZEMOVE) {
         GetClientRect(window, &resizeStartClient);
         resizeTargetSize = {};
@@ -220,6 +262,13 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
         return FALSE;
     }
     auto *sdlWindow = getMainWindow();
+    if (message == FIT_HEIGHT_MESSAGE) {
+        if (heightFitPending && sdlWindow && !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN) && !IsIconic(window) &&
+            !IsZoomed(window)) {
+            fitLockedHeight(window);
+        }
+        return 0;
+    }
     if (sdlWindow && !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN) && !IsIconic(window)) {
         if (message == WM_SIZING) {
             auto &rect = *reinterpret_cast<RECT *>(lParam);
@@ -241,6 +290,17 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
     changingDpi = message == WM_DPICHANGED;
     const auto result = CallWindowProcW(previousWindowProc, window, message, wParam, lParam);
     changingDpi = false;
+    if (message == WM_NCHITTEST && lockedClientHeight(window) > 0) {
+        // Held at a height, only the side edges resize: the top edge moves the window like its caption, the bottom
+        // edge is plain border, and a corner resizes the width alone.
+        switch (result) {
+            case HTTOP: return HTCAPTION;
+            case HTBOTTOM: return HTBORDER;
+            case HTTOPLEFT: case HTBOTTOMLEFT: return HTLEFT;
+            case HTTOPRIGHT: case HTBOTTOMRIGHT: return HTRIGHT;
+            default: break;
+        }
+    }
     if (message == WM_GETMINMAXINFO && sdlWindow && !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN)) {
         MONITORINFO monitor{sizeof(MONITORINFO)};
         if (GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) {
@@ -253,6 +313,22 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
             auto &limits = *reinterpret_cast<MINMAXINFO *>(lParam);
             limits.ptMaxSize = {position.cx, position.cy};
             limits.ptMaxPosition = {position.x - monitor.rcMonitor.left, position.y - monitor.rcMonitor.top};
+            if (const LONG lockedHeight = lockedClientHeight(window)) {
+                // SDL pins a window it may not resize at whatever size it has, and lets only its own resizes past
+                // that; the locked range is the one that holds, for fitting the window to it and for DPI changes.
+                RECT frame{}, client{};
+                GetWindowRect(window, &frame);
+                GetClientRect(window, &client);
+                const LONG borderWidth = frame.right - frame.left - client.right;
+                const LONG borderHeight = frame.bottom - frame.top - client.bottom;
+                const bool single = minimumWindowAspect == maximumWindowAspect;
+                const auto minimumWidth = static_cast<LONG>(single ? std::round(lockedHeight * minimumWindowAspect)
+                                                                   : std::ceil(lockedHeight * minimumWindowAspect));
+                const auto maximumWidth = static_cast<LONG>(single ? std::round(lockedHeight * maximumWindowAspect)
+                                                                   : std::floor(lockedHeight * maximumWindowAspect));
+                limits.ptMinTrackSize = {minimumWidth + borderWidth, lockedHeight + borderHeight};
+                limits.ptMaxTrackSize = {maximumWidth + borderWidth, lockedHeight + borderHeight};
+            }
             return 0;
         }
     }
@@ -267,28 +343,63 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
     if (resizingWindow && (message == WM_SIZE || message == WM_PAINT)) {
         static_cast<WindowsPlatform *>(BasePlatform::getPlatform())->renderDuringResize();
     }
+    // Back from fullscreen, once SDL has restored the window's own size.
+    if (heightFitPending && message == WM_SIZE && wParam == SIZE_RESTORED && sdlWindow &&
+        !(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN)) {
+        PostMessageW(window, FIT_HEIGHT_MESSAGE, 0, 0);
+    }
     return result;
 }
 
+/**
+ * setWindowAspectRatio(minimum, maximum, height = 0): keeps the client area's aspect within the range. A height (logical
+ * pixels) also holds the client area at that height: the window is scaled to it at its aspect, and only its width can
+ * change after; with a single aspect it cannot be resized at all.
+ */
 static bool jsbSetWindowAspectRatio(se::State &s) {
     const auto &args = s.args();
-    SE_PRECONDITION2(args.size() == 2 && args[0].isNumber() && args[1].isNumber(), false, "Expected minimum and maximum window aspect ratios");
+    SE_PRECONDITION2((args.size() == 2 || args.size() == 3) && args[0].isNumber() && args[1].isNumber() &&
+                     (args.size() == 2 || args[2].isNumber()), false, "Expected minimum and maximum window aspect ratios, and a height");
     const double minimum = args[0].toDouble(), maximum = args[1].toDouble();
+    const double height = args.size() == 3 ? args[2].toDouble() : 0;
     SE_PRECONDITION2(std::isfinite(minimum) && std::isfinite(maximum) && minimum > 0 && maximum >= minimum,
                      false, "Invalid window aspect ratio range");
+    SE_PRECONDITION2(std::isfinite(height) && height >= 0, false, "Invalid window height");
     auto *sdlWindow = getMainWindow();
     if (!sdlWindow) { s.rval().setBoolean(false); return true; }
     const auto window = reinterpret_cast<HWND>(SDLHelper::getWindowHandle(sdlWindow));
     minimumWindowAspect = minimum;
     maximumWindowAspect = maximum;
+    lockedWindowHeight = height;
+    // The height is held only once the window has been brought to it, so its aspect is still its own until then.
+    heightFitPending = height > 0;
     if (!aspectWindow) {
         previousWindowProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(aspectWindowProc)));
         if (!previousWindowProc) { s.rval().setBoolean(false); return true; }
         aspectWindow = window;
     }
-    RECT rect{};
-    GetWindowRect(window, &rect);
-    SetWindowPos(window, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    SDL_SetWindowResizable(sdlWindow, height > 0 && minimum == maximum ? SDL_FALSE : SDL_TRUE);
+    // Held at a height, a window whose width may still change is not maximized either (WM_STYLECHANGING keeps it so);
+    // freed, a resizable window gets its maximize button back. SDL leaves the style alone when resizability is unchanged.
+    if (!(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN)) {
+        const LONG_PTR style = GetWindowLongPtrW(window, GWL_STYLE);
+        const LONG_PTR maximizable = height <= 0 && (SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_RESIZABLE) ? WS_MAXIMIZEBOX : 0;
+        if ((style & WS_MAXIMIZEBOX) != maximizable) SetWindowLongPtrW(window, GWL_STYLE, (style & ~WS_MAXIMIZEBOX) | maximizable);
+    }
+    // SDL only changes the style: the frame and its maximize button are redrawn, and the frame's new thickness is taken
+    // up, once Windows is told the frame changed. The size below then counts the new frame.
+    SetWindowPos(window, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    if (height > 0) {
+        // A fullscreen or minimized window is brought to it when it is back (FIT_HEIGHT_MESSAGE).
+        if (!(SDL_GetWindowFlags(sdlWindow) & SDL_WINDOW_FULLSCREEN) && !IsIconic(window)) {
+            if (IsZoomed(window)) ShowWindow(window, SW_RESTORE);
+            fitLockedHeight(window);
+        }
+    } else {
+        RECT rect{};
+        GetWindowRect(window, &rect);
+        SetWindowPos(window, nullptr, 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
     s.rval().setBoolean(true);
     return true;
 }

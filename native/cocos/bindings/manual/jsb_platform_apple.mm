@@ -60,6 +60,12 @@ static SDL_Cursor *systemCursor{nullptr};
 @property(nonatomic, assign) SDL_Window *sdlWindow;
 @property(nonatomic, assign) double minimumAspect;
 @property(nonatomic, assign) double maximumAspect;
+/** The content height the window keeps, in points; 0 lets it take any height. */
+@property(nonatomic, assign) double lockedHeight;
+/** The window has yet to be brought to that height (it was fullscreen): until then the height is not held. */
+@property(nonatomic, assign) BOOL heightFitPending;
+- (BOOL)isFullScreen:(NSWindow *)window;
+- (void)fitLockedHeight:(NSWindow *)window;
 @end
 
 @implementation CCWindowAspectDelegate
@@ -74,6 +80,15 @@ static SDL_Cursor *systemCursor{nullptr};
         (SDL_GetWindowFlags(self.sdlWindow) & SDL_WINDOW_FULLSCREEN)) return size;
     NSSize content = [window contentRectForFrameRect:NSMakeRect(0, 0, size.width, size.height)].size;
     if (content.width <= 0 || content.height <= 0) return size;
+    if (self.lockedHeight > 0 && !self.heightFitPending) {
+        // The height stays; the width follows the aspect range at that height.
+        content.height = self.lockedHeight;
+        content.width = self.minimumAspect == self.maximumAspect
+            ? std::round(self.lockedHeight * self.minimumAspect)
+            : std::clamp<CGFloat>(content.width, std::ceil(self.lockedHeight * self.minimumAspect),
+                                  std::floor(self.lockedHeight * self.maximumAspect));
+        return [window frameRectForContentRect:NSMakeRect(0, 0, content.width, content.height)].size;
+    }
     if (vertical) {
         content.height = self.minimumAspect == self.maximumAspect
             ? std::round(content.width / self.minimumAspect)
@@ -110,6 +125,34 @@ static SDL_Cursor *systemCursor{nullptr};
         return;
     }
     if ([self.originalDelegate respondsToSelector:_cmd]) [self.originalDelegate windowDidResize:notification];
+    [self fitPendingHeight:window];
+}
+- (void)windowDidExitFullScreen:(NSNotification *)notification {
+    if ([self.originalDelegate respondsToSelector:_cmd]) [self.originalDelegate windowDidExitFullScreen:notification];
+    [self fitPendingHeight:notification.object];
+}
+- (BOOL)isFullScreen:(NSWindow *)window {
+    return (window.styleMask & NSWindowStyleMaskFullScreen) || (SDL_GetWindowFlags(self.sdlWindow) & SDL_WINDOW_FULLSCREEN);
+}
+/** Brings the window to its locked height once it is back from fullscreen. */
+- (void)fitPendingHeight:(NSWindow *)window {
+    if (!self.heightFitPending || [self isFullScreen:window] || window.isMiniaturized) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self.heightFitPending && ![self isFullScreen:window]) [self fitLockedHeight:window];
+    });
+}
+/** Brings the window to its locked height, at its aspect within the range, keeping its top and centre where they were. */
+- (void)fitLockedHeight:(NSWindow *)window {
+    const NSSize content = window.contentView.frame.size;
+    self.heightFitPending = NO;
+    if (self.lockedHeight <= 0 || content.width <= 0 || content.height <= 0) return;
+    const double aspect = std::clamp<double>(content.width / content.height, self.minimumAspect, self.maximumAspect);
+    NSRect frame = window.frame;
+    const NSSize size = [window frameRectForContentRect:NSMakeRect(0, 0, std::round(self.lockedHeight * aspect), self.lockedHeight)].size;
+    frame.origin.x += (frame.size.width - size.width) / 2;
+    frame.origin.y += frame.size.height - size.height;
+    frame.size = size;
+    [window setFrame:frame display:YES];
 }
 - (void)dealloc {
     [_originalDelegate release];
@@ -210,12 +253,20 @@ static SDL_Window *getMainWindow() {
     return SDL_GetWindowFromID(ISystemWindow::mainWindowId);
 }
 
+/**
+ * setWindowAspectRatio(minimum, maximum, height = 0): keeps the content area's aspect within the range. A height (points)
+ * also holds the content area at that height: the window is scaled to it at its aspect, and only its width can change
+ * after; with a single aspect it cannot be resized at all.
+ */
 static bool JSB_setWindowAspectRatio(se::State &s) {
     const auto &args = s.args();
-    SE_PRECONDITION2(args.size() == 2 && args[0].isNumber() && args[1].isNumber(), false, "Expected minimum and maximum window aspect ratios");
+    SE_PRECONDITION2((args.size() == 2 || args.size() == 3) && args[0].isNumber() && args[1].isNumber() &&
+                     (args.size() == 2 || args[2].isNumber()), false, "Expected minimum and maximum window aspect ratios, and a height");
     const double minimum = args[0].toDouble(), maximum = args[1].toDouble();
+    const double height = args.size() == 3 ? args[2].toDouble() : 0;
     SE_PRECONDITION2(std::isfinite(minimum) && std::isfinite(maximum) && minimum > 0 && maximum >= minimum,
                      false, "Invalid window aspect ratio range");
+    SE_PRECONDITION2(std::isfinite(height) && height >= 0, false, "Invalid window height");
     auto *sdlWindow = getMainWindow();
     if (!sdlWindow) { s.rval().setBoolean(false); return true; }
     auto *window = reinterpret_cast<NSWindow *>(SDLHelper::getWindowHandle(sdlWindow));
@@ -229,8 +280,20 @@ static bool JSB_setWindowAspectRatio(se::State &s) {
     }
     delegate.minimumAspect = minimum;
     delegate.maximumAspect = maximum;
+    delegate.lockedHeight = height;
+    // The height is held only once the window has been brought to it, so its aspect is still its own until then.
+    delegate.heightFitPending = height > 0;
     window.delegate = delegate;
-    [delegate windowDidResize:[NSNotification notificationWithName:NSWindowDidResizeNotification object:window]];
+    SDL_SetWindowResizable(sdlWindow, height > 0 && minimum == maximum ? SDL_FALSE : SDL_TRUE);
+    if (height > 0) {
+        // A fullscreen or minimized window is brought to it when it is back (fitPendingHeight).
+        if (![delegate isFullScreen:window] && !window.isMiniaturized) {
+            if (window.isZoomed) [window zoom:nil];
+            [delegate fitLockedHeight:window];
+        }
+    } else {
+        [delegate windowDidResize:[NSNotification notificationWithName:NSWindowDidResizeNotification object:window]];
+    }
     s.rval().setBoolean(true);
     return true;
 }
