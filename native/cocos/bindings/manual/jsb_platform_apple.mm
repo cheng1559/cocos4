@@ -108,6 +108,20 @@ static SDL_Cursor *systemCursor{nullptr};
     }
     const NSSize content = [window contentRectForFrameRect:NSMakeRect(0, 0, size.width, size.height)].size;
     const NSSize current = window.contentView.frame.size;
+    const BOOL corner = content.width != current.width && content.height != current.height;
+    if (corner && !(self.lockedHeight > 0 && !self.heightFitPending) && ![self isFullScreen:window] &&
+        content.width > 0 && content.height > 0) {
+        // A corner follows the pointer within the range. Outside it, the size is the nearest one on the range's edge,
+        // the pointer's projection onto that aspect's line, so it moves smoothly with the pointer: keeping either the
+        // width or the height instead jumps between two sizes as the drag's direction wavers.
+        const double aspect = content.width / content.height;
+        if (self.minimumAspect != self.maximumAspect && aspect >= self.minimumAspect && aspect <= self.maximumAspect) return size;
+        const double bound = aspect > self.maximumAspect ? self.maximumAspect : self.minimumAspect;
+        const double height = std::max(1.0, std::round((content.width * bound + content.height) / (bound * bound + 1)));
+        const double width = self.minimumAspect == self.maximumAspect ? std::round(height * bound)
+            : bound == self.maximumAspect ? std::floor(height * bound) : std::ceil(height * bound);
+        return [window frameRectForContentRect:NSMakeRect(0, 0, width, height)].size;
+    }
     return [self constrainSize:size forWindow:window
                    vertically:std::abs(content.height - current.height) > std::abs(content.width - current.width)];
 }

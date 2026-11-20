@@ -60,7 +60,6 @@ static bool heightFitPending{false};
 static constexpr UINT FIT_HEIGHT_MESSAGE = WM_APP + 0xC51;
 static constexpr UINT_PTR RESIZE_TIMER_ID = 0xCC51;
 static bool resizingWindow{false};
-static RECT resizeStartClient{};
 static SIZE resizeTargetSize{};
 
 const ccstd::unordered_map<ccstd::string, ccstd::string> &getFontFamilyNameMap() {
@@ -141,9 +140,20 @@ static void constrainWindowRect(HWND window, RECT &rect, bool vertical, UINT edg
         // Vertical drags may grow the width, but shortening the height must not shrink it.
         vertical = width > height * maximumWindowAspect;
     } else if (edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT || edge == WMSZ_BOTTOMLEFT || edge == WMSZ_BOTTOMRIGHT) {
-        // Use a stable baseline so constraining one axis cannot flip the next event's drag direction.
-        const auto &start = resizingWindow ? resizeStartClient : client;
-        vertical = std::abs(width - start.right) > std::abs(height - start.bottom);
+        // A corner follows the pointer within the range. Outside it, the size is the nearest one on the range's edge,
+        // the pointer's projection onto that aspect's line, so it moves smoothly with the pointer: keeping either the
+        // width or the height instead jumps between two sizes as the drag's direction wavers.
+        const double aspect = width / height;
+        if (minimumWindowAspect != maximumWindowAspect && aspect >= minimumWindowAspect && aspect <= maximumWindowAspect) return;
+        const double bound = aspect > maximumWindowAspect ? maximumWindowAspect : minimumWindowAspect;
+        const LONG clientHeight = std::max<LONG>(1, std::lround((width * bound + height) / (bound * bound + 1)));
+        const LONG clientWidth = static_cast<LONG>(minimumWindowAspect == maximumWindowAspect ? std::round(clientHeight * bound)
+            : bound == maximumWindowAspect ? std::floor(clientHeight * bound) : std::ceil(clientHeight * bound));
+        if (edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT) rect.top = rect.bottom - clientHeight - borderHeight;
+        else rect.bottom = rect.top + clientHeight + borderHeight;
+        if (edge == WMSZ_TOPLEFT || edge == WMSZ_BOTTOMLEFT) rect.left = rect.right - clientWidth - borderWidth;
+        else rect.right = rect.left + clientWidth + borderWidth;
+        return;
     }
     if (vertical) {
         const LONG outerHeight = static_cast<LONG>(minimumWindowAspect == maximumWindowAspect
@@ -237,6 +247,14 @@ static void fitLockedHeight(HWND window) {
 // True while SDL moves the window to the rect Windows suggests for a new DPI.
 static bool changingDpi = false;
 
+/**
+ * A frame of a live resize, waited on until the compositor has taken it: composited at its new size before the frame
+ * arrives, the window would show the last one, of the old size, with black where it grew.
+ */
+static void renderResizeFrame() {
+    static_cast<WindowsPlatform *>(BasePlatform::getPlatform())->renderDuringResize();
+    DwmFlush();
+}
 
 static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
     if (message == WM_STYLECHANGING && wParam == GWL_STYLE && lockedWindowHeight > 0) {
@@ -244,7 +262,6 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
         reinterpret_cast<STYLESTRUCT *>(lParam)->styleNew &= ~WS_MAXIMIZEBOX;
     }
     if (message == WM_ENTERSIZEMOVE) {
-        GetClientRect(window, &resizeStartClient);
         resizeTargetSize = {};
         resizingWindow = true;
         SetTimer(window, RESIZE_TIMER_ID, 16, nullptr);
@@ -253,7 +270,7 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
         KillTimer(window, RESIZE_TIMER_ID);
     }
     else if (message == WM_TIMER && wParam == RESIZE_TIMER_ID) {
-        static_cast<WindowsPlatform *>(BasePlatform::getPlatform())->renderDuringResize();
+        renderResizeFrame();
         return 0;
     }
     else if (message == WM_GETDPISCALEDSIZE) {
@@ -341,7 +358,7 @@ static LRESULT CALLBACK aspectWindowProc(HWND window, UINT message, WPARAM wPara
     }
     // SDL must queue the new size before rendering; WM_TIMER alone can leave a stale frame during live resize.
     if (resizingWindow && (message == WM_SIZE || message == WM_PAINT)) {
-        static_cast<WindowsPlatform *>(BasePlatform::getPlatform())->renderDuringResize();
+        renderResizeFrame();
     }
     // Back from fullscreen, once SDL has restored the window's own size.
     if (heightFitPending && message == WM_SIZE && wParam == SIZE_RESTORED && sdlWindow &&
