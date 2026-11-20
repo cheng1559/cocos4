@@ -66,6 +66,7 @@ static SDL_Cursor *systemCursor{nullptr};
 @property(nonatomic, assign) BOOL heightFitPending;
 - (BOOL)isFullScreen:(NSWindow *)window;
 - (void)fitLockedHeight:(NSWindow *)window;
+- (void)applySizeLimits:(NSWindow *)window;
 @end
 
 @implementation CCWindowAspectDelegate
@@ -122,8 +123,11 @@ static SDL_Cursor *systemCursor{nullptr};
             : bound == self.maximumAspect ? std::floor(height * bound) : std::ceil(height * bound);
         return [window frameRectForContentRect:NSMakeRect(0, 0, width, height)].size;
     }
+    // An edge drag keeps the dragged side and sets the other from it. With a single aspect the dragged side leads and the
+    // other follows, so the window scales: set from the other side, the dragged one would stay where it was.
+    const BOOL verticalDrag = std::abs(content.height - current.height) > std::abs(content.width - current.width);
     return [self constrainSize:size forWindow:window
-                   vertically:std::abs(content.height - current.height) > std::abs(content.width - current.width)];
+                   vertically:self.minimumAspect == self.maximumAspect ? !verticalDrag : verticalDrag];
 }
 - (void)windowDidResize:(NSNotification *)notification {
     NSWindow *window = notification.object;
@@ -141,9 +145,33 @@ static SDL_Cursor *systemCursor{nullptr};
     if ([self.originalDelegate respondsToSelector:_cmd]) [self.originalDelegate windowDidResize:notification];
     [self fitPendingHeight:window];
 }
+- (void)windowWillEnterFullScreen:(NSNotification *)notification {
+    // AppKit takes a window into fullscreen only when its maximum size fits the screen.
+    [self clearSizeLimits:notification.object];
+    if ([self.originalDelegate respondsToSelector:_cmd]) [self.originalDelegate windowWillEnterFullScreen:notification];
+}
 - (void)windowDidExitFullScreen:(NSNotification *)notification {
     if ([self.originalDelegate respondsToSelector:_cmd]) [self.originalDelegate windowDidExitFullScreen:notification];
-    [self fitPendingHeight:notification.object];
+    if (self.heightFitPending) [self fitPendingHeight:notification.object];
+    else [self applySizeLimits:notification.object];
+}
+/**
+ * Tells AppKit the sizes a held window may take, so its edges offer only the drags it allows: one that keeps its height
+ * shows no up-and-down arrows, and its corners resize the width alone. Any other window is not limited.
+ */
+- (void)applySizeLimits:(NSWindow *)window {
+    if (self.lockedHeight <= 0 || self.heightFitPending || [self isFullScreen:window]) {
+        [self clearSizeLimits:window];
+        return;
+    }
+    const double height = self.lockedHeight;
+    const BOOL single = self.minimumAspect == self.maximumAspect;
+    window.contentMinSize = NSMakeSize(single ? std::round(height * self.minimumAspect) : std::ceil(height * self.minimumAspect), height);
+    window.contentMaxSize = NSMakeSize(single ? std::round(height * self.maximumAspect) : std::floor(height * self.maximumAspect), height);
+}
+- (void)clearSizeLimits:(NSWindow *)window {
+    window.contentMinSize = NSMakeSize(0, 0);
+    window.contentMaxSize = NSMakeSize(FLT_MAX, FLT_MAX);
 }
 - (BOOL)isFullScreen:(NSWindow *)window {
     return (window.styleMask & NSWindowStyleMaskFullScreen) || (SDL_GetWindowFlags(self.sdlWindow) & SDL_WINDOW_FULLSCREEN);
@@ -167,6 +195,7 @@ static SDL_Cursor *systemCursor{nullptr};
     frame.origin.y += frame.size.height - size.height;
     frame.size = size;
     [window setFrame:frame display:YES];
+    [self applySizeLimits:window];
 }
 - (void)dealloc {
     [_originalDelegate release];
@@ -308,6 +337,8 @@ static bool JSB_setWindowAspectRatio(se::State &s) {
     } else {
         [delegate windowDidResize:[NSNotification notificationWithName:NSWindowDidResizeNotification object:window]];
     }
+    // Held, freed, or held once it is back from fullscreen: AppKit's size limits follow.
+    [delegate applySizeLimits:window];
     s.rval().setBoolean(true);
     return true;
 }

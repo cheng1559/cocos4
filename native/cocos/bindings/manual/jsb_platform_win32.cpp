@@ -136,7 +136,11 @@ static void constrainWindowRect(HWND window, RECT &rect, bool vertical, UINT edg
         else rect.right = rect.left + lockedWidth + borderWidth;
         return;
     }
-    if (edge == WMSZ_TOP || edge == WMSZ_BOTTOM) {
+    if (minimumWindowAspect == maximumWindowAspect && (edge == WMSZ_LEFT || edge == WMSZ_RIGHT || edge == WMSZ_TOP || edge == WMSZ_BOTTOM)) {
+        // With a single aspect the dragged edge leads and the other side follows it, so the window scales: held to
+        // its own length, the other side would hold the dragged one where it was.
+        vertical = edge == WMSZ_LEFT || edge == WMSZ_RIGHT;
+    } else if (edge == WMSZ_TOP || edge == WMSZ_BOTTOM) {
         // Vertical drags may grow the width, but shortening the height must not shrink it.
         vertical = width > height * maximumWindowAspect;
     } else if (edge == WMSZ_TOPLEFT || edge == WMSZ_TOPRIGHT || edge == WMSZ_BOTTOMLEFT || edge == WMSZ_BOTTOMRIGHT) {
